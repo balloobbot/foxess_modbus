@@ -3,6 +3,7 @@
 from datetime import timedelta
 from typing import Any
 from typing import Callable
+from typing import Iterator
 from typing import cast
 
 import pytest
@@ -78,8 +79,10 @@ class Harness:
 
 
 @pytest.fixture
-def make_harness(hass: HomeAssistant) -> Callable[..., Harness]:
+def make_harness(hass: HomeAssistant) -> Iterator[Callable[..., Harness]]:
     """Builds a controller polling a mock inverter over holding registers"""
+
+    controllers: list[ModbusController] = []
 
     def _make(
         max_read: int = 5,
@@ -109,9 +112,14 @@ def make_harness(hass: HomeAssistant) -> Callable[..., Harness]:
             _POLL_RATE,
             max_read,
         )
+        controllers.append(controller)
         return Harness(hass, controller, connection.for_unit(_SLAVE))
 
-    return _make
+    yield _make
+
+    # The controller registers a poll timer with hass, which has to be cancelled before the test ends
+    for controller in controllers:
+        controller.unload()
 
 
 async def test_poll_batches_addresses_into_reads_of_at_most_max_read(make_harness: Callable[..., Harness]) -> None:
