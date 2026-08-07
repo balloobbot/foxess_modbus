@@ -10,17 +10,23 @@ from datetime import datetime
 from datetime import timedelta
 from enum import Enum
 from typing import Any
+from typing import Awaitable
+from typing import Callable
 from typing import Iterable
 from typing import Iterator
+from typing import TypeVar
 
 from homeassistant.components.logbook import async_log_entry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.issue_registry import IssueSeverity
+from modbus_connection import ModbusConnectionError
+from modbus_connection import ModbusError
+from modbus_connection import ModbusExceptionError
+from modbus_connection import ModbusProtocolError
+from modbus_connection import ModbusTimeoutError
 
-from .client.modbus_client import ModbusClient
-from .client.modbus_client import ModbusClientFailedError
 from .common.entity_controller import EntityController
 from .common.entity_controller import EntityRemoteControlManager
 from .common.entity_controller import ModbusControllerEntity
@@ -29,6 +35,7 @@ from .common.exceptions import UnsupportedInverterError
 from .common.types import RegisterPollType
 from .common.types import RegisterType
 from .common.unload_controller import UnloadController
+from .connection import InverterConnection
 from .const import DOMAIN
 from .const import ENTITY_ID_PREFIX
 from .const import FRIENDLY_NAME
@@ -37,14 +44,21 @@ from .const import MAX_READ
 from .inverter_profiles import INVERTER_PROFILES
 from .inverter_profiles import InverterModelConnectionTypeProfile
 from .remote_control_manager import RemoteControlManager
-from .vendor.pymodbus import ConnectionException
-from .vendor.pymodbus import ExceptionResponse
-from .vendor.pymodbus import ModbusExceptions
 
 _LOGGER = logging.getLogger(__name__)
 
+T = TypeVar("T")
+
 # How many failed polls before we mark sensors as Unavailable
 _NUM_FAILED_POLLS_FOR_DISCONNECTION = 5
+
+# The inverter rejected the address we asked for. Modbus exception code 02, "illegal data address"
+_ILLEGAL_ADDRESS = 2
+
+# How many times to attempt a read/write which the inverter doesn't answer, or answers with a mangled frame.
+# Both happen often enough on these links to not be worth failing a whole poll over, see
+# https://github.com/nathanmarlor/foxess_modbus/discussions/792
+_NUM_ATTEMPTS = 3
 
 _MODEL_START_ADDRESS = 30000
 _MODEL_LENGTH = 15
@@ -116,7 +130,7 @@ class ModbusController(EntityController, UnloadController):
     def __init__(
         self,
         hass: HomeAssistant,
-        client: ModbusClient,
+        connection: InverterConnection,
         connection_type_profile: InverterModelConnectionTypeProfile,
         inverter_details: dict[str, Any],
         slave: int,
@@ -127,7 +141,8 @@ class ModbusController(EntityController, UnloadController):
         self._hass = hass
         self._update_listeners: set[ModbusControllerEntity] = set()
         self._data: dict[int, RegisterValue] = {}
-        self._client = client
+        self._connection = connection
+        self._unit = connection.for_unit(slave)
         self._connection_type_profile = connection_type_profile
         self._inverter_details = inverter_details
         self._slave = slave
@@ -235,8 +250,26 @@ class ModbusController(EntityController, UnloadController):
         return value
 
     async def read_registers(self, start_address: int, num_registers: int, register_type: RegisterType) -> list[int]:
-        """Read one of more registers, used by the read_registers_service"""
-        return await self._client.read_registers(start_address, num_registers, register_type, self._slave)
+        """Read one or more registers"""
+        if register_type == RegisterType.HOLDING:
+            read = self._unit.read_holding_registers
+        elif register_type == RegisterType.INPUT:
+            read = self._unit.read_input_registers
+        else:
+            raise AssertionError()
+
+        return await self._retry(lambda: read(start_address, num_registers))
+
+    async def _retry(self, call: Callable[[], Awaitable[T]]) -> T:
+        """Run a Modbus operation, retrying if the inverter doesn't answer or answers with a mangled frame"""
+        for attempt in range(_NUM_ATTEMPTS):
+            try:
+                return await call()
+            except (ModbusTimeoutError, ModbusProtocolError) as ex:
+                if attempt == _NUM_ATTEMPTS - 1:
+                    raise
+                _LOGGER.debug("Retrying request to %s %s after: %s", self._connection, self._slave, ex)
+        raise AssertionError()
 
     async def write_register(self, address: int, value: int) -> None:
         await self.write_registers(address, [value])
@@ -245,7 +278,7 @@ class ModbusController(EntityController, UnloadController):
         """Write multiple registers"""
         _LOGGER.debug(
             "Writing registers for %s %s: (%s, %s)",
-            self._client,
+            self._connection,
             self._slave,
             start_address,
             values,
@@ -255,12 +288,15 @@ class ModbusController(EntityController, UnloadController):
                 value = int(value)  # Ensure that we've been given an int
                 if not (_INT16_MIN <= value <= _UINT16_MAX):
                     raise ValueError(f"Value {value} must be between {_INT16_MIN} and {_UINT16_MAX}")
-                # pymodbus doesn't like negative values
+                # Modbus registers are unsigned on the wire
                 if value < 0:
                     value = _UINT16_MAX + value + 1
                 values[i] = value
 
-            await self._client.write_registers(start_address, values, self._slave)
+            if len(values) > 1:
+                await self._retry(lambda: self._unit.write_registers(start_address, values))
+            else:
+                await self._retry(lambda: self._unit.write_register(start_address, values[0]))
 
             changed_addresses = set()
             for i, value in enumerate(values):
@@ -286,7 +322,7 @@ class ModbusController(EntityController, UnloadController):
                 _LOGGER.warning(
                     "Aborting refresh of %s %s as a previous refresh is still in progress. Is your poll rate '%s' too "
                     "high?",
-                    self._client,
+                    self._connection,
                     self._slave,
                     self._poll_rate,
                 )
@@ -311,32 +347,44 @@ class ModbusController(EntityController, UnloadController):
 
                 _LOGGER.debug(
                     "Refresh of %s %s complete - notifying sensors: %s",
-                    self._client,
+                    self._connection,
                     self._slave,
                     changed_addresses,
                 )
                 self._notify_update(changed_addresses)
-            except ConnectionException as ex:
+            except ModbusConnectionError as ex:
                 exception = ex
                 _LOGGER.debug(
                     "Failed to connect to %s %s: %s",
-                    self._client,
+                    self._connection,
                     self._slave,
                     ex,
                 )
-            except ModbusClientFailedError as ex:
+            except ModbusProtocolError as ex:
+                # We've seen cases where the remote device gets two requests at the same time and sends the wrong
+                # response to the wrong thing. Make this clearer than a debug message, so people spot and fix it
+                exception = ex
+                _LOGGER.warning(
+                    "Invalid response when polling %s %s: %s. Please ensure that your adapter is correctly configured "
+                    "to allow multiple connections, see the instructions at "
+                    "https://github.com/nathanmarlor/foxess_modbus/wiki",
+                    self._connection,
+                    self._slave,
+                    ex,
+                )
+            except ModbusError as ex:
                 exception = ex
                 _LOGGER.debug(
                     "Modbus error when polling %s %s: %s",
-                    self._client,
+                    self._connection,
                     self._slave,
-                    ex.response,
+                    ex,
                 )
             except Exception as ex:
                 exception = ex
                 _LOGGER.warning(
                     "General exception when polling %s %s: %s",
-                    self._client,
+                    self._connection,
                     self._slave,
                     repr(ex),
                     exc_info=True,
@@ -351,7 +399,7 @@ class ModbusController(EntityController, UnloadController):
                 elif self._connection_state == ConnectionState.DISCONNECTED:
                     _LOGGER.info(
                         "%s %s - poll succeeded: now connected",
-                        self._client,
+                        self._connection,
                         self._slave,
                     )
                     self._connection_state = ConnectionState.CONNECTED
@@ -368,7 +416,7 @@ class ModbusController(EntityController, UnloadController):
                 if self._num_failed_poll_attempts >= _NUM_FAILED_POLLS_FOR_DISCONNECTION:
                     _LOGGER.warning(
                         "%s %s - %s failed poll attempts: now not connected. Last error: %s",
-                        self._client,
+                        self._connection,
                         self._slave,
                         self._num_failed_poll_attempts,
                         exception,
@@ -484,11 +532,8 @@ class ModbusController(EntityController, UnloadController):
 
     # List of (start address, [read values starting at that address])
     async def _read_all_registers(self) -> list[tuple[int, Iterable[int | None]]]:
-        def _is_illegal_address(ex: ModbusClientFailedError) -> bool:
-            return (
-                isinstance(ex.response, ExceptionResponse)
-                and ex.response.exception_code == ModbusExceptions.IllegalAddress
-            )
+        def _is_illegal_address(ex: ModbusError) -> bool:
+            return isinstance(ex, ModbusExceptionError) and ex.exception_code == _ILLEGAL_ADDRESS
 
         read_values: list[tuple[int, Iterable[int | None]]] = []
 
@@ -498,29 +543,28 @@ class ModbusController(EntityController, UnloadController):
         for start_address, num_reads in read_ranges:
             _LOGGER.debug(
                 "Reading addresses on %s %s: (%s, %s)",
-                self._client,
+                self._connection,
                 self._slave,
                 start_address,
                 num_reads,
             )
             try:
-                reads = await self._client.read_registers(
+                reads = await self.read_registers(
                     start_address,
                     num_reads,
                     self._connection_type_profile.register_type,
-                    self._slave,
                 )
                 read_values.append((start_address, reads))
 
-            except ModbusClientFailedError as ex:
+            except ModbusError as ex:
                 if not _is_illegal_address(ex):
                     raise
 
                 _LOGGER.debug(
                     "IllegalAddress when polling %s %s: %s. Trying each register individually...",
-                    self._client,
+                    self._connection,
                     self._slave,
-                    ex.response,
+                    ex,
                 )
 
                 # Right, at least one of this range failed. Find out what it wasn't happy with, and read the others
@@ -529,23 +573,21 @@ class ModbusController(EntityController, UnloadController):
 
                     _LOGGER.debug(
                         "Reading single address on %s %s: (%s)",
-                        self._client,
+                        self._connection,
                         self._slave,
                         address,
                     )
                     try:
-                        read = await self._client.read_registers(
-                            address, 1, self._connection_type_profile.register_type, self._slave
-                        )
+                        read = await self.read_registers(address, 1, self._connection_type_profile.register_type)
                         assert len(read) == 1
                         read_values.append((address, read))
-                    except ModbusClientFailedError as ex:
+                    except ModbusError as ex:
                         if not _is_illegal_address(ex):
                             raise
 
                         _LOGGER.warning(
                             "%s %s: register %s is invalid",
-                            self._client,
+                            self._connection,
                             self._slave,
                             address,
                         )
@@ -590,20 +632,15 @@ class ModbusController(EntityController, UnloadController):
             await self._remote_control_manager.became_connected_callback()
 
     @staticmethod
-    async def autodetect(client: ModbusClient, slave: int, adapter_config: dict[str, Any]) -> tuple[str, str]:
+    async def autodetect(connection: InverterConnection, slave: int, adapter_config: dict[str, Any]) -> tuple[str, str]:
         """
         Attempts to auto-detect the inverter type at the other end of the given connection
 
         :returns: Tuple of (inverter type name e.g. "H1", inverter full name e.g. "H1-3.7-E")
         """
-        # Annoyingly pymodbus logs the important stuff to its logger, and doesn't add that info to the exceptions it
-        # throws
-        spy_handler = _SpyHandler()
-        pymodbus_logger = logging.getLogger("pymodbus")
+        unit = connection.for_unit(slave)
 
         try:
-            pymodbus_logger.addHandler(spy_handler)
-
             # All known inverter types expose the model number at holding register 30000 onwards.
             # (The H1 series additionally expose some model info in input registers))
             # Holding registers 30000-300015 seem to be all used for the model, with registers
@@ -615,11 +652,9 @@ class ModbusController(EntityController, UnloadController):
             start_address = _MODEL_START_ADDRESS
             while len(register_values) < _MODEL_LENGTH:
                 register_values.extend(
-                    await client.read_registers(
+                    await unit.read_holding_registers(
                         start_address,
                         min(adapter_config[MAX_READ], _MODEL_LENGTH - len(register_values)),
-                        RegisterType.HOLDING,
-                        slave,
                     )
                 )
                 start_address += adapter_config[MAX_READ]
@@ -654,17 +689,7 @@ class ModbusController(EntityController, UnloadController):
             _LOGGER.error("Did not recognise inverter model '%s' (%s)", full_model, register_values)
             raise UnsupportedInverterError(full_model)
         except Exception as ex:
-            _LOGGER.exception("Autodetect: failed to connect to (%s)", client)
-            raise AutoconnectFailedError(spy_handler.records) from ex
+            _LOGGER.exception("Autodetect: failed to connect to (%s)", connection)
+            raise AutoconnectFailedError from ex
         finally:
-            pymodbus_logger.removeHandler(spy_handler)
-            await client.close()
-
-
-class _SpyHandler(logging.Handler):
-    def __init__(self) -> None:
-        super().__init__(level=logging.ERROR)
-        self.records: list[logging.LogRecord] = []
-
-    def emit(self, record: logging.LogRecord) -> None:
-        self.records.append(record)
+            await connection.close()

@@ -17,9 +17,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import UNDEFINED
 from slugify import slugify
 
-from .client.modbus_client import ModbusClient
 from .common.types import HassData
 from .common.types import HassDataEntry
+from .connection import InverterConnection
+from .connection import build_connection
 from .const import ADAPTER_ID
 from .const import ADAPTER_WAS_MIGRATED
 from .const import CONFIG_SAVE_TIME
@@ -34,7 +35,6 @@ from .const import MODBUS_SLAVE
 from .const import MODBUS_TYPE
 from .const import PLATFORMS
 from .const import POLL_RATE
-from .const import RTU_OVER_TCP
 from .const import SERIAL
 from .const import STARTUP_MESSAGE
 from .const import TCP
@@ -64,14 +64,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_options = copy.deepcopy(dict(entry.options))
 
     # Create this before throwing ConfigEntryAuthFailed, so the sensors, etc, platforms don't fail
-    hass.data.setdefault(DOMAIN, HassData()).setdefault(
-        entry.entry_id, HassDataEntry(controllers=[], modbus_clients=[])
-    )
+    hass.data.setdefault(DOMAIN, HassData()).setdefault(entry.entry_id, HassDataEntry(controllers=[], connections=[]))
 
-    def create_controller(client: ModbusClient, inverter: dict[str, Any]) -> None:
+    def create_controller(connection: InverterConnection, inverter: dict[str, Any]) -> None:
         controller = ModbusController(
             hass,
-            client,
+            connection,
             inverter_connection_type_profile_from_config(inverter),
             inverter,
             inverter[MODBUS_SLAVE],
@@ -82,8 +80,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     controllers: list[ModbusController] = []
 
-    # {(modbus_type, host): client}
-    clients: dict[tuple[str, str], ModbusClient] = {}
+    # Inverters which share an adapter share its connection
+    connections: dict[tuple[str, str], InverterConnection] = {}
     for inverter_id, inverter in entry_data[INVERTERS].items():
         # Remember that there might not be any options
         options = entry_options.get(INVERTERS, {}).get(inverter_id, {})
@@ -101,19 +99,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if options:
             inverter.update(options)
 
-        client_key = (inverter[MODBUS_TYPE], inverter[HOST])
-        client = clients.get(client_key)
-        if client is None:
-            if inverter[MODBUS_TYPE] in [TCP, UDP, RTU_OVER_TCP]:
-                host_parts = inverter[HOST].split(":")
-                params = {"host": host_parts[0], "port": int(host_parts[1])}
-            elif inverter[MODBUS_TYPE] == SERIAL:
-                params = {"port": inverter[HOST], "baudrate": 9600}
-            else:
-                raise AssertionError()
-            client = ModbusClient(hass, inverter[MODBUS_TYPE], adapter, params)
-            clients[client_key] = client
-        create_controller(client, inverter)
+        connection_key = (inverter[MODBUS_TYPE], inverter[HOST])
+        connection = connections.get(connection_key)
+        if connection is None:
+            connection = build_connection(inverter[MODBUS_TYPE], adapter, inverter[HOST])
+            connections[connection_key] = connection
+        create_controller(connection, inverter)
 
     read_registers_service.register(hass, controllers)
     write_registers_service.register(hass, controllers)
@@ -122,7 +113,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass_data: HassData = hass.data[DOMAIN]
     hass_data[entry.entry_id]["controllers"] = controllers
-    hass_data[entry.entry_id]["modbus_clients"] = list(clients.values())
+    hass_data[entry.entry_id]["connections"] = list(connections.values())
     hass_data[entry.entry_id]["unload"] = entry.add_update_listener(async_reload_entry)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -265,8 +256,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         for controller in controllers:
             controller.unload()
 
-        clients = hass_data[entry.entry_id]["modbus_clients"]
-        await asyncio.gather(*[client.close() for client in clients])
+        connections = hass_data[entry.entry_id]["connections"]
+        await asyncio.gather(*[connection.close() for connection in connections])
 
         hass_data[entry.entry_id]["unload"]()
         hass_data.pop(entry.entry_id)

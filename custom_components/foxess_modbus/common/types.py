@@ -12,7 +12,7 @@ from typing import TypeAlias
 from typing import TypedDict
 
 if TYPE_CHECKING:
-    from ..client.modbus_client import ModbusClient
+    from ..connection import InverterConnection
     from ..modbus_controller import ModbusController
 
 
@@ -112,7 +112,7 @@ class RegisterPollType(IntEnum):
 
 class HassDataEntry(TypedDict):
     controllers: list["ModbusController"]
-    modbus_clients: list["ModbusClient"]
+    connections: list["InverterConnection"]
     unload: NotRequired[Callable[[], None]]
 
 

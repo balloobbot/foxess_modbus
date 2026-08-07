@@ -8,10 +8,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.core import ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
+from modbus_connection import ModbusError
 
 from ..const import DOMAIN
 from ..modbus_controller import ModbusController
-from ..vendor.pymodbus import ModbusIOException
 from .utils import get_controller_from_friendly_name_or_device_id
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
@@ -69,6 +69,6 @@ async def _write_service(
         start_address = service_data.data["start_address"]
         values = service_data.data["values"].split(",")
         await controller.write_registers(start_address, values)
-    except ModbusIOException as ex:
+    except ModbusError as ex:
         _LOGGER.warning(ex, exc_info=True)
         raise HomeAssistantError() from ex

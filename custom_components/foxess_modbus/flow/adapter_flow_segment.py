@@ -7,12 +7,13 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.selector import selector
+from modbus_connection import ModbusConnectionError
+from modbus_connection import ModbusProtocolError
 
-from ..client.modbus_client import ModbusClient
-from ..client.modbus_client import ModbusClientFailedError
 from ..common.exceptions import AutoconnectFailedError
 from ..common.exceptions import UnsupportedInverterError
 from ..common.types import ConnectionType
+from ..connection import build_connection
 from ..const import RTU_OVER_TCP
 from ..const import SERIAL
 from ..const import TCP
@@ -21,8 +22,6 @@ from ..inverter_adapters import ADAPTERS
 from ..inverter_adapters import InverterAdapter
 from ..inverter_adapters import InverterAdapterType
 from ..modbus_controller import ModbusController
-from ..vendor.pymodbus import ConnectionException
-from ..vendor.pymodbus import ModbusIOException
 from .flow_handler_mixin import FlowHandlerMixin
 from .flow_handler_mixin import ValidationFailedError
 from .inverter_data import InverterData
@@ -273,15 +272,9 @@ class AdapterFlowSegment:
             raise ValidationFailedError({"base": "duplicate_connection_details"})
 
         try:
-            if protocol in [TCP, UDP, RTU_OVER_TCP]:
-                params = {"host": host.split(":")[0], "port": int(host.split(":")[1])}
-            elif protocol == SERIAL:
-                params = {"port": host, "baudrate": 9600}
-            else:
-                raise AssertionError()
-            client = ModbusClient(self._flow.hass, protocol, adapter, params)
+            connection = build_connection(protocol, adapter, host)
             base_model, full_model = await ModbusController.autodetect(
-                client, slave, adapter.config.inverter_config(protocol)
+                connection, slave, adapter.config.inverter_config(protocol)
             )
 
             self.inverter_data.inverter_base_model = base_model
@@ -295,75 +288,25 @@ class AdapterFlowSegment:
                 error_placeholders={"not_supported_model": ex.full_model},
             ) from ex
         except AutoconnectFailedError as ex:
+            is_lan = adapter.connection_type == ConnectionType.LAN
+            cause = ex.__cause__
 
-            def get_details(ex: AutoconnectFailedError, use_exception: bool) -> str:
-                if ex.log_records:
-                    parts = []
-                    if use_exception:
-                        parts.append(str(ex.__cause__))
-                    parts.extend({record.message for record in ex.log_records})
-                    result = "; ".join(parts)
-                else:
-                    # Oh. Fall back
-                    result = str(ex.__cause__)
-                return result
-
-            if isinstance(ex.__cause__, ConnectionException):
-                # Mainly TCP timeouts. The actual exception message dosen't contain anything interesting here
-                raise ValidationFailedError(
-                    {
-                        "base": (
-                            "unable_to_connect_to_inverter"
-                            if adapter.connection_type == ConnectionType.LAN
-                            else "unable_to_connect_to_adapter"
-                        )
-                    },
-                    error_placeholders={"error_details": get_details(ex, False)},
-                ) from ex
-
-            if isinstance(ex.__cause__, ModbusIOException):
-                # This is for things like invalid frames. The exception message here can be useful
-                raise ValidationFailedError(
-                    {
-                        "base": (
-                            "unable_to_communicate_with_inverter"
-                            if adapter.connection_type == ConnectionType.LAN
-                            else "adapter_unable_to_communicate_with_inverter"
-                        )
-                    },
-                    error_placeholders={"error_details": get_details(ex, True)},
-                ) from ex
-
-            if isinstance(ex.__cause__, ModbusClientFailedError):
-                # This happens for things like UDP timeouts, inverter not connected to adapter, etc.
-                # Annoyingly everything *seems* to come through as a ModbusIOException, so we can't tell exactly
-                # what's going on. The error message here isn't useful to us. However, if it's got a __cause__ that can
-                # be interesting, and if it doesn't the .response is useful
-                client_failed_ex = ex.__cause__
-                detail_parts = [str(client_failed_ex.response)]
-                detail_parts.extend(record.message for record in ex.log_records)
-                details = "; ".join(detail_parts)
-
-                raise ValidationFailedError(
-                    {
-                        "base": (
-                            "other_inverter_error"
-                            if adapter.connection_type == ConnectionType.LAN
-                            else "other_adapter_error"
-                        )
-                    },
-                    error_placeholders={"error_details": details},
-                ) from ex
+            if isinstance(cause, (ModbusConnectionError, TimeoutError)):
+                # We couldn't reach the thing at all: a refused/timed-out TCP connect, a serial port which isn't
+                # there, or a UDP endpoint which never answered
+                error = "unable_to_connect_to_inverter" if is_lan else "unable_to_connect_to_adapter"
+            elif isinstance(cause, ModbusProtocolError):
+                # We're talking to something, but it isn't speaking Modbus back at us properly
+                error = (
+                    "unable_to_communicate_with_inverter" if is_lan else "adapter_unable_to_communicate_with_inverter"
+                )
+            else:
+                # Rejected requests, and anything else we didn't anticipate
+                error = "other_inverter_error" if is_lan else "other_adapter_error"
 
             raise ValidationFailedError(
-                {
-                    "base": (
-                        "other_inverter_error"
-                        if adapter.connection_type == ConnectionType.LAN
-                        else "other_adapter_error"
-                    )
-                },
-                error_placeholders={"error_details": get_details(ex, True)},
+                {"base": error},
+                error_placeholders={"error_details": str(cause)},
             ) from ex
 
     def _validate_hostname(self, host: str) -> None:

@@ -1,7 +1,5 @@
 """ "Unsupported inverter exception"""
 
-import logging
-
 
 class UnsupportedInverterError(Exception):
     """Unsupported inverter exception"""
@@ -15,7 +13,4 @@ class UnsupportedInverterError(Exception):
 
 
 class AutoconnectFailedError(Exception):
-    """Raised when we fail to auto-connect to an inverter during setup"""
-
-    def __init__(self, log_records: list[logging.LogRecord]) -> None:
-        self.log_records = log_records
+    """Raised when we fail to auto-connect to an inverter during setup. __cause__ has the details"""
