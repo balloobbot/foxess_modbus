@@ -30,7 +30,6 @@ from modbus_connection import ModbusTimeoutError
 from .common.entity_controller import EntityController
 from .common.entity_controller import EntityRemoteControlManager
 from .common.entity_controller import ModbusControllerEntity
-from .common.exceptions import AutoconnectFailedError
 from .common.exceptions import UnsupportedInverterError
 from .common.types import RegisterPollType
 from .common.types import RegisterType
@@ -688,8 +687,11 @@ class ModbusController(EntityController, UnloadController):
             # We've read the model type, but been unable to match it against a supported model
             _LOGGER.error("Did not recognise inverter model '%s' (%s)", full_model, register_values)
             raise UnsupportedInverterError(full_model)
-        except Exception as ex:
+        except UnsupportedInverterError:
+            # We talked to the inverter fine, we just don't support it. Already logged above
+            raise
+        except Exception:
             _LOGGER.exception("Autodetect: failed to connect to (%s)", connection)
-            raise AutoconnectFailedError from ex
+            raise
         finally:
             await connection.close()

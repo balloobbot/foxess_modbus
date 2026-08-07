@@ -181,7 +181,10 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         energy_manager = await async_get_manager(hass)
         if energy_manager.data is not None:
             energy_data = copy.deepcopy(energy_manager.data)
-            for energy_source in energy_data.get("energy_sources", []):
+            # A union of TypedDicts, but this predates most of them and pokes at keys generically. Note that HA
+            # migrates legacy grid sources to its unified shape on load, so the grid branch is a no-op these days
+            energy_sources: list[dict[str, Any]] = energy_data.get("energy_sources", [])  # type: ignore[assignment]
+            for energy_source in energy_sources:
                 if energy_source["type"] == "solar":
                     energy_source.setdefault("config_entry_solar_forecast", None)
                 elif energy_source["type"] == "grid":

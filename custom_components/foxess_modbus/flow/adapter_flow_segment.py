@@ -6,11 +6,11 @@ from typing import Callable
 import voluptuous as vol
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.selector import SerialPortSelector
 from homeassistant.helpers.selector import selector
 from modbus_connection import ModbusConnectionError
 from modbus_connection import ModbusProtocolError
 
-from ..common.exceptions import AutoconnectFailedError
 from ..common.exceptions import UnsupportedInverterError
 from ..common.types import ConnectionType
 from ..connection import build_connection
@@ -230,7 +230,7 @@ class AdapterFlowSegment:
                 vol.Required(
                     "serial_device",
                     default=adapter.default_host,
-                ): cv.string,
+                ): SerialPortSelector(),
                 vol.Required("modbus_slave", default=_DEFAULT_SLAVE): int,
             }
         )
@@ -287,27 +287,29 @@ class AdapterFlowSegment:
                 {"base": "inverter_model_not_supported"},
                 error_placeholders={"not_supported_model": ex.full_model},
             ) from ex
-        except AutoconnectFailedError as ex:
-            is_lan = adapter.connection_type == ConnectionType.LAN
-            cause = ex.__cause__
-
-            if isinstance(cause, (ModbusConnectionError, TimeoutError)):
-                # We couldn't reach the thing at all: a refused/timed-out TCP connect, a serial port which isn't
-                # there, or a UDP endpoint which never answered
-                error = "unable_to_connect_to_inverter" if is_lan else "unable_to_connect_to_adapter"
-            elif isinstance(cause, ModbusProtocolError):
-                # We're talking to something, but it isn't speaking Modbus back at us properly
-                error = (
-                    "unable_to_communicate_with_inverter" if is_lan else "adapter_unable_to_communicate_with_inverter"
-                )
-            else:
-                # Rejected requests, and anything else we didn't anticipate
-                error = "other_inverter_error" if is_lan else "other_adapter_error"
-
-            raise ValidationFailedError(
-                {"base": error},
-                error_placeholders={"error_details": str(cause)},
+        # We couldn't reach the thing at all: a refused or timed-out TCP connect, a serial port which isn't
+        # there, or a UDP endpoint which never answered
+        except (ModbusConnectionError, TimeoutError) as ex:
+            raise self._connection_error(
+                adapter, ex, "unable_to_connect_to_inverter", "unable_to_connect_to_adapter"
             ) from ex
+        # We're talking to something, but it isn't speaking Modbus back at us properly
+        except ModbusProtocolError as ex:
+            raise self._connection_error(
+                adapter, ex, "unable_to_communicate_with_inverter", "adapter_unable_to_communicate_with_inverter"
+            ) from ex
+        # Rejected requests, and anything else we didn't anticipate. Without this the flow would show HA's
+        # "Unknown error occurred" rather than something the user can act on
+        except Exception as ex:
+            raise self._connection_error(adapter, ex, "other_inverter_error", "other_adapter_error") from ex
+
+    @staticmethod
+    def _connection_error(
+        adapter: InverterAdapter, ex: Exception, lan_error: str, adapter_error: str
+    ) -> ValidationFailedError:
+        """Build the error to show the user, choosing between the wordings for a direct and an adapted connection"""
+        error = lan_error if adapter.connection_type == ConnectionType.LAN else adapter_error
+        return ValidationFailedError({"base": error}, error_placeholders={"error_details": str(ex)})
 
     def _validate_hostname(self, host: str) -> None:
         if not re.fullmatch(r"[a-zA-Z0-9\.\-]+", host):

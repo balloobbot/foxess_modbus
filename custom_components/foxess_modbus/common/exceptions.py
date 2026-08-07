@@ -10,7 +10,3 @@ class UnsupportedInverterError(Exception):
     def __str__(self) -> str:
         """String representation"""
         return f"Inverter model not supported: '{self.full_model}'"
-
-
-class AutoconnectFailedError(Exception):
-    """Raised when we fail to auto-connect to an inverter during setup. __cause__ has the details"""
