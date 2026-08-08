@@ -1,8 +1,5 @@
 """Builds the Modbus connection to an adapter, which every inverter behind it shares"""
 
-import asyncio
-from typing import Any
-
 from modbus_connection import ModbusSerialParams
 from modbus_connection import ModbusTcpParams
 from modbus_connection import ModbusUdpParams
@@ -28,19 +25,13 @@ _LAN_CONNECT_DELAY = 1.0
 
 
 class InverterConnection(ModbusConnection):
-    """A connection which pauses after connecting, which some inverters need"""
+    """A connection which knows how to describe itself, for logs and error messages"""
 
     def __init__(self, params: ModbusParams, *, connect_delay: float, message_spacing: float) -> None:
-        super().__init__(params, message_spacing=message_spacing)
+        super().__init__(params, connect_delay=connect_delay, message_spacing=message_spacing)
         self.connect_delay = connect_delay
         self.message_spacing = message_spacing
         self.description = describe(params)
-
-    async def _connect_client(self) -> Any:
-        client = await super()._connect_client()
-        if self.connect_delay > 0:
-            await asyncio.sleep(self.connect_delay)
-        return client
 
     def __str__(self) -> str:
         return self.description

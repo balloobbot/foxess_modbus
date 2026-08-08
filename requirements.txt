@@ -10,7 +10,7 @@ fnv_hash_fast  # Or this?
 pytest-asyncio
 
 # For pytest. Keep in sync with manifest.json.
-modbus-connection[tmodbus]==4.1.0
+modbus-connection[tmodbus]==4.2.0
 
 # Tooling
 colorlog==6.10.1

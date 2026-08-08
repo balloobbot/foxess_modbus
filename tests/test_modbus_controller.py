@@ -4,13 +4,12 @@ from datetime import timedelta
 from typing import Any
 from typing import Callable
 from typing import Iterator
-from typing import cast
 
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
+from modbus_connection import IllegalDataAddressError
 from modbus_connection import ModbusConnectionError
-from modbus_connection import ModbusExceptionError
 from modbus_connection import ModbusTimeoutError
 from modbus_connection.mock import MockModbusConnection
 from modbus_connection.mock import MockModbusUnit
@@ -21,7 +20,6 @@ from custom_components.foxess_modbus.common.types import ConnectionType
 from custom_components.foxess_modbus.common.types import Inv
 from custom_components.foxess_modbus.common.types import InverterModel
 from custom_components.foxess_modbus.common.types import RegisterType
-from custom_components.foxess_modbus.connection import InverterConnection
 from custom_components.foxess_modbus.const import ENTITY_ID_PREFIX
 from custom_components.foxess_modbus.const import FRIENDLY_NAME
 from custom_components.foxess_modbus.const import INVERTER_MODEL
@@ -34,8 +32,13 @@ from custom_components.foxess_modbus.modbus_controller import ModbusController
 _SLAVE = 247
 _POLL_RATE = 10
 
-# Modbus exception code 02, which the controller treats as "this register doesn't exist"
-_ILLEGAL_ADDRESS = 2
+# A poll which has to establish the connection suspends on the library's connect flight, which is a plain asyncio
+# task rather than one Home Assistant tracks, so a single async_block_till_done() can return while the poll is
+# still running. Three rounds is enough today; five leaves headroom
+_POLL_DRAIN_ITERATIONS = 5
+
+_FC_WRITE_SINGLE_REGISTER = 0x06
+_FC_WRITE_MULTIPLE_REGISTERS = 0x10
 
 
 class Entity(ModbusControllerEntity):
@@ -60,10 +63,17 @@ class Entity(ModbusControllerEntity):
 class Harness:
     """A controller wired up to an in-memory inverter"""
 
-    def __init__(self, hass: HomeAssistant, controller: ModbusController, unit: MockModbusUnit) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        controller: ModbusController,
+        connection: MockModbusConnection,
+        unit: MockModbusUnit,
+    ) -> None:
         self._hass = hass
         self._polls = 0
         self.controller = controller
+        self.connection = connection
         self.unit = unit
 
     def add_entity(self, *addresses: int) -> Entity:
@@ -75,7 +85,8 @@ class Harness:
         """Let the controller's poll timer fire, and wait for the poll to finish"""
         self._polls += 1
         async_fire_time_changed(self._hass, dt_util.utcnow() + timedelta(seconds=_POLL_RATE * self._polls + 1))
-        await self._hass.async_block_till_done()
+        for _ in range(_POLL_DRAIN_ITERATIONS):
+            await self._hass.async_block_till_done()
 
 
 @pytest.fixture
@@ -100,7 +111,7 @@ def make_harness(hass: HomeAssistant) -> Iterator[Callable[..., Harness]]:
         connection = MockModbusConnection()
         controller = ModbusController(
             hass,
-            cast(InverterConnection, connection),
+            connection,
             profile,
             {
                 INVERTER_MODEL: "Kuara 6.0-3-H",
@@ -113,7 +124,7 @@ def make_harness(hass: HomeAssistant) -> Iterator[Callable[..., Harness]]:
             max_read,
         )
         controllers.append(controller)
-        return Harness(hass, controller, connection.for_unit(_SLAVE))
+        return Harness(hass, controller, connection, connection.for_unit(_SLAVE))
 
     yield _make
 
@@ -154,7 +165,7 @@ async def test_rejected_register_is_read_individually_then_skipped(make_harness:
     harness.add_entity(10)
     harness.add_entity(20)
     harness.unit.holding[10] = 7
-    harness.unit.fail_read(20, ModbusExceptionError(_ILLEGAL_ADDRESS))
+    harness.unit.fail_read(20, IllegalDataAddressError())
 
     await harness.poll()
 
@@ -233,18 +244,30 @@ async def test_negative_written_values_are_sent_as_unsigned(make_harness: Callab
 async def test_multiple_values_are_written_in_one_request(make_harness: Callable[..., Harness]) -> None:
     harness = make_harness()
     writes: list[Any] = []
-    harness.unit.on_write(lambda event: writes.append((event.address, event.values)))
+    harness.unit.on_write(lambda event: writes.append((event.address, event.values, event.function_code)))
 
     await harness.controller.write_registers(1, [10, 20, 30])
 
-    assert writes == [(1, [10, 20, 30])]
+    assert writes == [(1, [10, 20, 30], _FC_WRITE_MULTIPLE_REGISTERS)]
+
+
+async def test_a_single_value_is_written_with_write_single_register(make_harness: Callable[..., Harness]) -> None:
+    # Which function code goes out is not an implementation detail: some inverters only accept 0x06 for a single
+    # register, so collapsing this onto write_registers would work against the mock and fail against hardware
+    harness = make_harness()
+    writes: list[Any] = []
+    harness.unit.on_write(lambda event: writes.append((event.address, event.values, event.function_code)))
+
+    await harness.controller.write_register(1, 10)
+
+    assert writes == [(1, [10], _FC_WRITE_SINGLE_REGISTER)]
 
 
 async def test_repeated_failures_mark_the_inverter_disconnected(make_harness: Callable[..., Harness]) -> None:
     harness = make_harness()
     entity = harness.add_entity(1)
     harness.unit.holding[1] = 5
-    harness.unit.fail_read(1, ModbusConnectionError("connection refused"))
+    harness.unit.fail_requests(ModbusConnectionError("connection refused"))
 
     for _ in range(4):
         await harness.poll()
@@ -255,9 +278,35 @@ async def test_repeated_failures_mark_the_inverter_disconnected(make_harness: Ca
     assert harness.controller.current_connection_error == "connection refused"
     assert entity.connection_changes == 1
 
-    harness.unit.fail_read(1, None)
+    harness.unit.fail_requests(None)
     await harness.poll()
 
     assert harness.controller.is_connected
     assert harness.controller.current_connection_error is None
     assert entity.connection_changes == 2
+
+
+async def test_a_wedged_link_is_dropped_so_the_next_poll_rebuilds_it(make_harness: Callable[..., Harness]) -> None:
+    # Some adapters keep the socket open but stop answering. Reconnecting is the only way out, and it must not
+    # need a config entry reload
+    harness = make_harness()
+    harness.add_entity(1)
+    harness.unit.holding[1] = 5
+
+    await harness.poll()
+    assert harness.controller.is_connected
+    assert harness.connection.connected
+
+    harness.unit.fail_requests(ModbusTimeoutError("no response"))
+    for _ in range(5):
+        await harness.poll()
+
+    assert not harness.controller.is_connected
+    assert not harness.connection.connected, "the wedged link should have been dropped"
+
+    harness.unit.fail_requests(None)
+    await harness.poll()
+
+    assert harness.controller.is_connected
+    assert harness.connection.connected, "the next poll should have established a fresh link"
+    assert harness.controller.read(1, signed=False) == 5

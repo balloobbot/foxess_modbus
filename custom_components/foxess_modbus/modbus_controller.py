@@ -21,9 +21,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.issue_registry import IssueSeverity
+from modbus_connection import IllegalDataAddressError
+from modbus_connection import ModbusConnection
 from modbus_connection import ModbusConnectionError
 from modbus_connection import ModbusError
-from modbus_connection import ModbusExceptionError
 from modbus_connection import ModbusProtocolError
 from modbus_connection import ModbusTimeoutError
 
@@ -34,7 +35,6 @@ from .common.exceptions import UnsupportedInverterError
 from .common.types import RegisterPollType
 from .common.types import RegisterType
 from .common.unload_controller import UnloadController
-from .connection import InverterConnection
 from .const import DOMAIN
 from .const import ENTITY_ID_PREFIX
 from .const import FRIENDLY_NAME
@@ -50,9 +50,6 @@ T = TypeVar("T")
 
 # How many failed polls before we mark sensors as Unavailable
 _NUM_FAILED_POLLS_FOR_DISCONNECTION = 5
-
-# The inverter rejected the address we asked for. Modbus exception code 02, "illegal data address"
-_ILLEGAL_ADDRESS = 2
 
 # How many times to attempt a read/write which the inverter doesn't answer, or answers with a mangled frame.
 # Both happen often enough on these links to not be worth failing a whole poll over, see
@@ -129,7 +126,7 @@ class ModbusController(EntityController, UnloadController):
     def __init__(
         self,
         hass: HomeAssistant,
-        connection: InverterConnection,
+        connection: ModbusConnection,
         connection_type_profile: InverterModelConnectionTypeProfile,
         inverter_details: dict[str, Any],
         slave: int,
@@ -423,6 +420,10 @@ class ModbusController(EntityController, UnloadController):
                     self._connection_state = ConnectionState.DISCONNECTED
                     self._current_connection_error = str(exception)
                     self._log_message(f"Connection error: {exception}")
+                    # The link might be up but wedged: some adapters keep the socket open and stop answering, or
+                    # start answering the wrong request. Drop it, so the next poll builds a fresh one. This is a
+                    # no-op if there's no link, which is the case when the inverter is simply switched off
+                    await self._recycle_connection()
                     issue_registry.async_create_issue(
                         self._hass,
                         domain=DOMAIN,
@@ -457,6 +458,14 @@ class ModbusController(EntityController, UnloadController):
 
         if self._remote_control_manager is not None:
             await self._remote_control_manager.poll_complete_callback()
+
+    async def _recycle_connection(self) -> None:
+        """Drop the link, so the next poll establishes a fresh one"""
+        try:
+            await self._connection.disconnect()
+        except ModbusError as ex:
+            # The link is dropped either way, so there's nothing to recover from here
+            _LOGGER.debug("Error disconnecting from %s: %s", self._connection, ex)
 
     def _log_message(self, message: str) -> None:
         friendly_name = self.inverter_details[FRIENDLY_NAME]
@@ -531,9 +540,6 @@ class ModbusController(EntityController, UnloadController):
 
     # List of (start address, [read values starting at that address])
     async def _read_all_registers(self) -> list[tuple[int, Iterable[int | None]]]:
-        def _is_illegal_address(ex: ModbusError) -> bool:
-            return isinstance(ex, ModbusExceptionError) and ex.exception_code == _ILLEGAL_ADDRESS
-
         read_values: list[tuple[int, Iterable[int | None]]] = []
 
         read_ranges = self._create_read_ranges(
@@ -555,10 +561,7 @@ class ModbusController(EntityController, UnloadController):
                 )
                 read_values.append((start_address, reads))
 
-            except ModbusError as ex:
-                if not _is_illegal_address(ex):
-                    raise
-
+            except IllegalDataAddressError as ex:
                 _LOGGER.debug(
                     "IllegalAddress when polling %s %s: %s. Trying each register individually...",
                     self._connection,
@@ -580,10 +583,7 @@ class ModbusController(EntityController, UnloadController):
                         read = await self.read_registers(address, 1, self._connection_type_profile.register_type)
                         assert len(read) == 1
                         read_values.append((address, read))
-                    except ModbusError as ex:
-                        if not _is_illegal_address(ex):
-                            raise
-
+                    except IllegalDataAddressError:
                         _LOGGER.warning(
                             "%s %s: register %s is invalid",
                             self._connection,
@@ -631,7 +631,7 @@ class ModbusController(EntityController, UnloadController):
             await self._remote_control_manager.became_connected_callback()
 
     @staticmethod
-    async def autodetect(connection: InverterConnection, slave: int, adapter_config: dict[str, Any]) -> tuple[str, str]:
+    async def autodetect(connection: ModbusConnection, slave: int, adapter_config: dict[str, Any]) -> tuple[str, str]:
         """
         Attempts to auto-detect the inverter type at the other end of the given connection
 

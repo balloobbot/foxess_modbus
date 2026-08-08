@@ -8,6 +8,8 @@ from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.selector import SerialPortSelector
 from homeassistant.helpers.selector import selector
+from modbus_connection import GatewayPathUnavailableError
+from modbus_connection import GatewayTargetError
 from modbus_connection import ModbusConnectionError
 from modbus_connection import ModbusProtocolError
 
@@ -293,8 +295,9 @@ class AdapterFlowSegment:
             raise self._connection_error(
                 adapter, ex, "unable_to_connect_to_inverter", "unable_to_connect_to_adapter"
             ) from ex
-        # We're talking to something, but it isn't speaking Modbus back at us properly
-        except ModbusProtocolError as ex:
+        # The adapter answered for the inverter to say it couldn't reach it, or we're talking to something which
+        # isn't speaking Modbus back at us properly. Either way the far end of the adapter is the thing to look at
+        except (GatewayTargetError, GatewayPathUnavailableError, ModbusProtocolError) as ex:
             raise self._connection_error(
                 adapter, ex, "unable_to_communicate_with_inverter", "adapter_unable_to_communicate_with_inverter"
             ) from ex
