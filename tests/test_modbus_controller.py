@@ -32,11 +32,6 @@ from custom_components.foxess_modbus.modbus_controller import ModbusController
 _SLAVE = 247
 _POLL_RATE = 10
 
-# A poll which has to establish the connection suspends on the library's connect flight, which is a plain asyncio
-# task rather than one Home Assistant tracks, so a single async_block_till_done() can return while the poll is
-# still running. Three rounds is enough today; five leaves headroom
-_POLL_DRAIN_ITERATIONS = 5
-
 _FC_WRITE_SINGLE_REGISTER = 0x06
 _FC_WRITE_MULTIPLE_REGISTERS = 0x10
 
@@ -82,11 +77,14 @@ class Harness:
         return entity
 
     async def poll(self) -> None:
-        """Let the controller's poll timer fire, and wait for the poll to finish"""
+        """Let the controller's poll timer fire, and wait for the poll to finish.
+
+        async_track_time_interval dispatches with background=True, and a poll which has to establish the connection
+        genuinely suspends, so the refresh is still pending when a plain async_block_till_done() returns.
+        """
         self._polls += 1
         async_fire_time_changed(self._hass, dt_util.utcnow() + timedelta(seconds=_POLL_RATE * self._polls + 1))
-        for _ in range(_POLL_DRAIN_ITERATIONS):
-            await self._hass.async_block_till_done()
+        await self._hass.async_block_till_done(wait_background_tasks=True)
 
 
 @pytest.fixture
