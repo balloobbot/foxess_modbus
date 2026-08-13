@@ -73,6 +73,23 @@ class RegisterValue:
     written_at: float | None = None  # From time.monotonic()
 
 
+@dataclass(frozen=True)
+class UpdateReport:
+    """What one poll managed to read.
+
+    ``values`` holds (start address, values) for each read which answered, and ``failed`` maps the address ranges
+    which didn't to the error which failed them. A failed range's registers keep their previous values. A dead link
+    is never in here: the poll raises ModbusConnectionError instead of reporting partial silence.
+    """
+
+    values: list[tuple[int, Iterable[int | None]]]
+    failed: dict[str, ModbusError]
+
+    @property
+    def complete(self) -> bool:
+        return not self.failed
+
+
 class ConnectionState(Enum):
     INITIAL = 0
     DISCONNECTED = 1
@@ -149,6 +166,9 @@ class ModbusController(EntityController, UnloadController):
         # To start, we're neither connected nor disconnected
         self._connection_state = ConnectionState.INITIAL
         self._current_connection_error: str | None = None
+        # Registers which are only polled once per connection are read until a poll reads all of them: a poll which
+        # only partly succeeded may not have got to them
+        self._read_on_connection_registers = True
         # Any ranges of registers which we've detected that we can't read
         self._detected_invalid_ranges = InvalidRegisterRanges()
 
@@ -326,13 +346,12 @@ class ModbusController(EntityController, UnloadController):
 
             exception: Exception | None = None
             try:
-                read_values = await self._read_all_registers()
+                report = await self._read_all_registers()
 
-                # If we made it to here, then all reads succeeded. Write them to _data and notify the sensors.
-                # This avoids recording reads if poll failed partway through (ensuring that we don't record potentially
-                # inconsistent data)
+                # Write the reads which answered to _data and notify their sensors. A range which didn't answer keeps
+                # its previous values: one slow block mustn't cost us everything else the poll read
                 changed_addresses = set()
-                for start_address, reads in read_values:
+                for start_address, reads in report.values:
                     for i, value in enumerate(reads):
                         address = start_address + i
                         # We might be reading a register we don't care about (for efficiency). Discard it if so
@@ -342,28 +361,24 @@ class ModbusController(EntityController, UnloadController):
                             changed_addresses.add(address)
 
                 _LOGGER.debug(
-                    "Refresh of %s %s complete - notifying sensors: %s",
+                    "Refresh of %s %s done - notifying sensors: %s",
                     self._connection,
                     self._slave,
                     changed_addresses,
                 )
                 self._notify_update(changed_addresses)
+
+                if report.complete:
+                    # Registers which are only polled once per connection have now been read
+                    self._read_on_connection_registers = False
+                elif not report.values:
+                    # Nothing at all answered. The link is up, but the inverter isn't talking to us, so treat this
+                    # like any other failed poll rather than as a partial one
+                    exception = next(iter(report.failed.values()))
             except ModbusConnectionError as ex:
                 exception = ex
                 _LOGGER.debug(
                     "Failed to connect to %s %s: %s",
-                    self._connection,
-                    self._slave,
-                    ex,
-                )
-            except ModbusProtocolError as ex:
-                # We've seen cases where the remote device gets two requests at the same time and sends the wrong
-                # response to the wrong thing. Make this clearer than a debug message, so people spot and fix it
-                exception = ex
-                _LOGGER.warning(
-                    "Invalid response when polling %s %s: %s. Please ensure that your adapter is correctly configured "
-                    "to allow multiple connections, see the instructions at "
-                    "https://github.com/nathanmarlor/foxess_modbus/wiki",
                     self._connection,
                     self._slave,
                     ex,
@@ -418,6 +433,7 @@ class ModbusController(EntityController, UnloadController):
                         exception,
                     )
                     self._connection_state = ConnectionState.DISCONNECTED
+                    self._read_on_connection_registers = True
                     self._current_connection_error = str(exception)
                     self._log_message(f"Connection error: {exception}")
                     # The link might be up but wedged: some adapters keep the socket open and stop answering, or
@@ -538,61 +554,95 @@ class ModbusController(EntityController, UnloadController):
         if start_address is not None:
             yield (start_address, read_size)
 
+    async def _read_all_registers(self) -> UpdateReport:
+        read_values: list[tuple[int, Iterable[int | None]]] = []
+        failed: dict[str, ModbusError] = {}
+
+        read_ranges = self._create_read_ranges(self._max_read, is_initial_connection=self._read_on_connection_registers)
+        for start_address, num_reads in read_ranges:
+            try:
+                read_values.extend(await self._read_range(start_address, num_reads))
+            except ModbusConnectionError:
+                # The link itself is down, so the remaining ranges won't fare any better
+                raise
+            except ModbusError as ex:
+                # One range going quiet (a slow block, a busy inverter) mustn't cost us the rest of the poll
+                key = f"{start_address}-{start_address + num_reads - 1}"
+                failed[key] = ex
+                if isinstance(ex, ModbusProtocolError):
+                    # We've seen cases where the remote device gets two requests at the same time and sends the wrong
+                    # response to the wrong thing. Make this clearer than a debug message, so people spot and fix it
+                    _LOGGER.warning(
+                        "Invalid response when polling %s %s addresses %s: %s. Please ensure that your adapter is "
+                        "correctly configured to allow multiple connections, see the instructions at "
+                        "https://github.com/nathanmarlor/foxess_modbus/wiki",
+                        self._connection,
+                        self._slave,
+                        key,
+                        ex,
+                    )
+                else:
+                    _LOGGER.debug(
+                        "Modbus error when polling %s %s addresses %s: %s",
+                        self._connection,
+                        self._slave,
+                        key,
+                        ex,
+                    )
+
+        return UpdateReport(read_values, failed)
+
     # List of (start address, [read values starting at that address])
-    async def _read_all_registers(self) -> list[tuple[int, Iterable[int | None]]]:
+    async def _read_range(self, start_address: int, num_reads: int) -> list[tuple[int, Iterable[int | None]]]:
         read_values: list[tuple[int, Iterable[int | None]]] = []
 
-        read_ranges = self._create_read_ranges(
-            self._max_read, is_initial_connection=self._connection_state != ConnectionState.CONNECTED
+        _LOGGER.debug(
+            "Reading addresses on %s %s: (%s, %s)",
+            self._connection,
+            self._slave,
+            start_address,
+            num_reads,
         )
-        for start_address, num_reads in read_ranges:
-            _LOGGER.debug(
-                "Reading addresses on %s %s: (%s, %s)",
-                self._connection,
-                self._slave,
+        try:
+            reads = await self.read_registers(
                 start_address,
                 num_reads,
+                self._connection_type_profile.register_type,
             )
-            try:
-                reads = await self.read_registers(
-                    start_address,
-                    num_reads,
-                    self._connection_type_profile.register_type,
-                )
-                read_values.append((start_address, reads))
+            read_values.append((start_address, reads))
 
-            except IllegalDataAddressError as ex:
+        except IllegalDataAddressError as ex:
+            _LOGGER.debug(
+                "IllegalAddress when polling %s %s: %s. Trying each register individually...",
+                self._connection,
+                self._slave,
+                ex,
+            )
+
+            # Right, at least one of this range failed. Find out what it wasn't happy with, and read the others
+            for i in range(num_reads):
+                address = start_address + i
+
                 _LOGGER.debug(
-                    "IllegalAddress when polling %s %s: %s. Trying each register individually...",
+                    "Reading single address on %s %s: (%s)",
                     self._connection,
                     self._slave,
-                    ex,
+                    address,
                 )
-
-                # Right, at least one of this range failed. Find out what it wasn't happy with, and read the others
-                for i in range(num_reads):
-                    address = start_address + i
-
-                    _LOGGER.debug(
-                        "Reading single address on %s %s: (%s)",
+                try:
+                    read = await self.read_registers(address, 1, self._connection_type_profile.register_type)
+                    assert len(read) == 1
+                    read_values.append((address, read))
+                except IllegalDataAddressError:
+                    _LOGGER.warning(
+                        "%s %s: register %s is invalid",
                         self._connection,
                         self._slave,
                         address,
                     )
-                    try:
-                        read = await self.read_registers(address, 1, self._connection_type_profile.register_type)
-                        assert len(read) == 1
-                        read_values.append((address, read))
-                    except IllegalDataAddressError:
-                        _LOGGER.warning(
-                            "%s %s: register %s is invalid",
-                            self._connection,
-                            self._slave,
-                            address,
-                        )
-                        self._detected_invalid_ranges.add(address)
-                        # Record None at this address, so the sensor gets an 'Unavailable' value
-                        read_values.append((address, [None]))
+                    self._detected_invalid_ranges.add(address)
+                    # Record None at this address, so the sensor gets an 'Unavailable' value
+                    read_values.append((address, [None]))
 
         return read_values
 
