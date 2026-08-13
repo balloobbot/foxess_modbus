@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
+from homeassistant.core import State
 from homeassistant.util import dt as dt_util
 from modbus_connection.mock import MockModbusConnection
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -50,7 +51,8 @@ _INVERTER: dict[str, Any] = {
 
 
 def _state(hass: HomeAssistant, entity_id: str) -> str:
-    state = hass.states.get(entity_id)
+    # hass.states is untyped in homeassistant-stubs, so annotate what it gives back
+    state: State | None = hass.states.get(entity_id)
     assert state is not None, f"{entity_id} was never created"
     return state.state
 
