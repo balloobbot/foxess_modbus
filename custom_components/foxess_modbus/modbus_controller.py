@@ -92,8 +92,15 @@ class UpdateReport:
 
     @property
     def updated(self) -> list[str]:
-        """The address ranges which answered, keyed as ``failed`` is"""
-        return [f"{start}-{start + len(values) - 1}" for start, values in self.values]
+        """The address ranges which answered, keyed as ``failed`` is.
+
+        A register the inverter rejected individually is recorded as None so its sensor blanks, and didn't answer.
+        """
+        return [
+            f"{start}-{start + len(values) - 1}"
+            for start, values in self.values
+            if any(value is not None for value in values)
+        ]
 
 
 class ConnectionState(Enum):
@@ -458,6 +465,8 @@ class ModbusController(EntityController, UnloadController):
                     )
                     self._connection_state = ConnectionState.DISCONNECTED
                     self._read_on_connection_registers = True
+                    # The link is about to be rebuilt, so a range which is still wrong afterwards is worth saying again
+                    self._wrong_response_ranges = frozenset()
                     self._current_connection_error = str(exception)
                     self._log_message(f"Connection error: {exception}")
                     # The link might be up but wedged: some adapters keep the socket open and stop answering, or

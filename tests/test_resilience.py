@@ -4,6 +4,7 @@ import logging
 from typing import Callable
 
 import pytest
+from modbus_connection import IllegalDataAddressError
 from modbus_connection import ModbusConnectionError
 from modbus_connection import ModbusProtocolError
 from modbus_connection import ModbusTimeoutError
@@ -141,6 +142,32 @@ async def test_a_range_which_keeps_answering_wrongly_is_only_reported_once(
     warnings = [x for x in caplog.records if x.levelno == logging.WARNING]
     assert len(warnings) == 1
     assert "100-101" in warnings[0].getMessage()
+
+
+async def test_a_rebuilt_link_reports_a_wrong_response_again(
+    make_harness: Callable[..., Harness], caplog: pytest.LogCaptureFixture
+) -> None:
+    harness = make_harness(max_read=5)
+    harness.add_entity(1, 2)
+    harness.unit.fail_read(1, ModbusProtocolError("wrong response"))
+
+    for _ in range(_NUM_FAILED_POLLS_FOR_DISCONNECTION + 1):
+        await harness.poll()
+
+    # Enough failures dropped the link, and the range still being wrong over the new one is worth hearing about
+    assert len([x for x in caplog.records if "Invalid response" in x.getMessage()]) == 2
+
+
+async def test_a_register_the_inverter_rejects_did_not_answer(make_harness: Callable[..., Harness]) -> None:
+    harness = make_harness(max_read=5)
+    harness.add_entity(1, 2)
+    harness.unit.fail_read(1, IllegalDataAddressError())
+
+    await harness.poll()
+
+    # Address 1 was rejected on its own and recorded as blank, so only address 2 actually answered
+    assert harness.controller.last_poll is not None
+    assert harness.controller.last_poll.updated == ["2-2"]
 
 
 async def test_on_connection_registers_are_read_until_a_poll_reads_them_all(
