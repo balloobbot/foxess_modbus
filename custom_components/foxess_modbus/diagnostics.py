@@ -15,8 +15,14 @@ from .modbus_controller import ModbusController
 
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
     """Return the raw register map of each inverter in this entry, so an issue report shows what it returned"""
-    hass_data: HassData = hass.data[DOMAIN]
-    return {"inverters": [_inverter(x) for x in hass_data[entry.entry_id]["controllers"]]}
+    # HA offers the download whatever state the entry is in, and a disabled one - or one whose setup failed - has no
+    # controllers to ask. Say so, rather than failing the download of the very thing we asked the user for
+    hass_data: HassData = hass.data.get(DOMAIN, {})
+    entry_data = hass_data.get(entry.entry_id)
+    if entry_data is None:
+        return {"loaded": False}
+
+    return {"loaded": True, "inverters": [_inverter(x) for x in entry_data["controllers"]]}
 
 
 def _inverter(controller: ModbusController) -> dict[str, Any]:

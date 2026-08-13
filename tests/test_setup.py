@@ -98,6 +98,14 @@ async def test_setting_up_the_entry_creates_sensors_which_read_the_inverter(hass
         await hass.async_block_till_done()
 
 
+async def test_diagnostics_of_an_entry_which_never_loaded(hass: HomeAssistant) -> None:
+    entry = _entry(hass)
+
+    # HA offers the download whether or not the entry is loaded, and being asked for diagnostics of a disabled or
+    # broken entry is exactly when they matter. It mustn't fail the download
+    assert await async_get_config_entry_diagnostics(hass, entry) == {"loaded": False}
+
+
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_diagnostics_dump_what_the_inverter_returned(hass: HomeAssistant) -> None:
     connection = MockModbusConnection()
