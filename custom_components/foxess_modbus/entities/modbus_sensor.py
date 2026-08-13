@@ -169,14 +169,19 @@ class ModbusSensor(ModbusEntityMixin, RestoreSensor):
         # Nothing is polled until the first refresh, so a total would otherwise read unknown until then
         if self.is_total and (last_data := await self.async_get_last_sensor_data()) is not None:
             self._attr_native_value = last_data.native_value
+        # HA writes the state straight after this, so don't schedule another write of our own
+        self._process_data()
+
+    def _process_data(self) -> None:
+        value = self._round_native_value(self._calculate_native_value())
+        # A total keeps what it had: reading unknown gaps the long-term statistics just as unavailable does
+        if value is not None or not self.is_total:
+            self._attr_native_value = value
 
     def _address_updated(self) -> None:
-        new_value = self._round_native_value(self._calculate_native_value())
-        # A total keeps what it had: reading unknown gaps the long-term statistics just as unavailable does
-        if new_value is None and self.is_total:
-            return
-        if new_value != self._attr_native_value:
-            self._attr_native_value = new_value
+        previous_value = self._attr_native_value
+        self._process_data()
+        if self._attr_native_value != previous_value:
             super()._address_updated()
 
     @property

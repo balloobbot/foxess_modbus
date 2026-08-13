@@ -30,6 +30,7 @@ def _controller(*, is_connected: bool = True) -> MagicMock:
     controller = MagicMock()
     controller.is_connected = is_connected
     controller.inverter_details = {ENTITY_ID_PREFIX: "", UNIQUE_ID_PREFIX: "", FRIENDLY_NAME: ""}
+    controller.read.return_value = None  # Nothing polled yet
     return controller
 
 
@@ -118,6 +119,19 @@ def test_an_offline_bms_does_not_blank_a_total(state_class: SensorStateClass, va
     bms_connect_state = 0  # BMS offline
     sensor._address_updated()  # noqa: SLF001
     assert sensor.native_value == value_when_offline
+
+
+async def test_a_sensor_added_after_a_poll_shows_the_current_value(hass: HomeAssistant) -> None:
+    controller = _controller()
+    controller.read.return_value = 42
+    sensor = _sensor(SensorStateClass.MEASUREMENT, controller=controller)
+    sensor.hass = hass
+    mock_restore_cache_with_extra_data(hass, ())
+
+    await sensor.async_added_to_hass()
+
+    # An entity enabled long after the first poll shouldn't sit at unknown until the next one
+    assert sensor.native_value == 42
 
 
 async def test_a_total_restores_its_value_across_a_restart(hass: HomeAssistant) -> None:
