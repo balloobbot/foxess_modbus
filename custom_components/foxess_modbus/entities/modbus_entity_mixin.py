@@ -125,18 +125,23 @@ class ModbusEntityMixin(
         return cast(str | None, self.entity_description.name)
 
     @property
+    def is_total(self) -> bool:
+        """Whether this entity accumulates rather than measures.
+
+        Read the entity's own state class, as IntegrationSensor sets _attr_state_class rather than the description.
+        """
+        return getattr(self, "state_class", None) in (
+            SensorStateClass.TOTAL,
+            SensorStateClass.TOTAL_INCREASING,
+        )
+
+    @property
     def available(self) -> bool:
         """Return True if entity is available."""
         # Totals hold their last value rather than going unavailable: blanking one gaps HA's long-term statistics and
         # the energy dashboard, and an inverter which is off overnight is routine. The trade is that a total never
         # reads unavailable even if the inverter never comes back; the connection status sensor carries that signal.
-        # Read the entity's own state class, as IntegrationSensor sets _attr_state_class rather than the description.
-        if getattr(self, "state_class", None) in (
-            SensorStateClass.TOTAL,
-            SensorStateClass.TOTAL_INCREASING,
-        ):
-            return True
-        return self._controller.is_connected
+        return self.is_total or self._controller.is_connected
 
     async def async_added_to_hass(self) -> None:
         """Add update callback after being added to hass."""

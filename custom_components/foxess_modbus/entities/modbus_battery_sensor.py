@@ -4,7 +4,6 @@ register
 """
 
 from dataclasses import dataclass
-from typing import Any
 
 from homeassistant.helpers.entity import Entity
 
@@ -71,8 +70,7 @@ class ModbusBatterySensor(ModbusSensor):
 
         self._bms_connect_state_address = bms_connect_state_address
 
-    @property
-    def native_value(self) -> Any:
+    def _calculate_native_value(self) -> int | float | None:
         if self._bms_connect_state_address is not None:
             bms_connect_state = self._controller.read(self._bms_connect_state_address, signed=False)
             # 0: Initial state, 1: OK, 2: NG
@@ -83,7 +81,7 @@ class ModbusBatterySensor(ModbusSensor):
             if bms_connect_state == 0 or bms_connect_state == 2:
                 return None
 
-        return super().native_value
+        return super()._calculate_native_value()
 
     @property
     def addresses(self) -> list[int]:

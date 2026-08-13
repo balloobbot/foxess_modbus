@@ -11,6 +11,7 @@ from typing import Any
 from typing import Callable
 from typing import cast
 
+from homeassistant.components.sensor import RestoreSensor
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.components.sensor import SensorEntityDescription
 from homeassistant.const import Platform
@@ -70,7 +71,7 @@ class ModbusSensorDescription(SensorEntityDescription, EntityFactory):  # type: 
         }
 
 
-class ModbusSensor(ModbusEntityMixin, SensorEntity):
+class ModbusSensor(ModbusEntityMixin, RestoreSensor):
     """Sensor class."""
 
     def __init__(
@@ -163,8 +164,17 @@ class ModbusSensor(ModbusEntityMixin, SensorEntity):
         else:
             self._address_updated()
 
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        # Nothing is polled until the first refresh, so a total would otherwise read unknown until then
+        if self.is_total and (last_data := await self.async_get_last_sensor_data()) is not None:
+            self._attr_native_value = last_data.native_value
+
     def _address_updated(self) -> None:
         new_value = self._round_native_value(self._calculate_native_value())
+        # A total keeps what it had: reading unknown gaps the long-term statistics just as unavailable does
+        if new_value is None and self.is_total:
+            return
         if new_value != self._attr_native_value:
             self._attr_native_value = new_value
             super()._address_updated()
