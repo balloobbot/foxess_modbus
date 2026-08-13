@@ -1,8 +1,11 @@
 """Tests for what a poll does when only part of the inverter answers"""
 
+import logging
 from typing import Callable
 
+import pytest
 from modbus_connection import ModbusConnectionError
+from modbus_connection import ModbusProtocolError
 from modbus_connection import ModbusTimeoutError
 from modbus_connection import ServerDeviceBusyError
 from modbus_connection.mock import MockModbusUnit
@@ -121,6 +124,23 @@ async def test_a_poll_where_nothing_answers_is_a_failed_poll(make_harness: Calla
     # The link is up but the inverter isn't talking to us at all, which containing failures per range mustn't hide
     assert not harness.controller.is_connected
     assert entity.connection_changes == 1
+
+
+async def test_a_range_which_keeps_answering_wrongly_is_only_reported_once(
+    make_harness: Callable[..., Harness], caplog: pytest.LogCaptureFixture
+) -> None:
+    harness = make_harness(max_read=5)
+    harness.add_entity(1, 2)
+    harness.add_entity(100, 101)
+    harness.unit.fail_read(100, ModbusProtocolError("wrong response"))
+
+    for _ in range(3):
+        await harness.poll()
+
+    # A misconfigured adapter answers wrongly on every poll, and the user only needs telling about it once
+    warnings = [x for x in caplog.records if x.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "100-101" in warnings[0].getMessage()
 
 
 async def test_on_connection_registers_are_read_until_a_poll_reads_them_all(

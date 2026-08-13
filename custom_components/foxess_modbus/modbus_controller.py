@@ -171,6 +171,8 @@ class ModbusController(EntityController, UnloadController):
         self._read_on_connection_registers = True
         # Any ranges of registers which we've detected that we can't read
         self._detected_invalid_ranges = InvalidRegisterRanges()
+        # Which read ranges failed the last poll, so we only complain about each as it starts failing
+        self._failed_ranges: frozenset[str] = frozenset()
 
         self._inverter_capacity = connection_type_profile.inverter_model_profile.inverter_capacity(
             self.inverter_details[INVERTER_MODEL]
@@ -569,26 +571,29 @@ class ModbusController(EntityController, UnloadController):
                 # One range going quiet (a slow block, a busy inverter) mustn't cost us the rest of the poll
                 key = f"{start_address}-{start_address + num_reads - 1}"
                 failed[key] = ex
-                if isinstance(ex, ModbusProtocolError):
-                    # We've seen cases where the remote device gets two requests at the same time and sends the wrong
-                    # response to the wrong thing. Make this clearer than a debug message, so people spot and fix it
-                    _LOGGER.warning(
-                        "Invalid response when polling %s %s addresses %s: %s. Please ensure that your adapter is "
-                        "correctly configured to allow multiple connections, see the instructions at "
-                        "https://github.com/nathanmarlor/foxess_modbus/wiki",
-                        self._connection,
-                        self._slave,
-                        key,
-                        ex,
-                    )
-                else:
-                    _LOGGER.debug(
-                        "Modbus error when polling %s %s addresses %s: %s",
-                        self._connection,
-                        self._slave,
-                        key,
-                        ex,
-                    )
+                _LOGGER.debug(
+                    "Modbus error when polling %s %s addresses %s: %s",
+                    self._connection,
+                    self._slave,
+                    key,
+                    ex,
+                )
+
+        # We've seen cases where the remote device gets two requests at the same time and sends the wrong response to
+        # the wrong thing. Make this clearer than a debug message, so people spot and fix it - but only as each range
+        # starts failing, otherwise a misconfigured adapter fills the log with the same line every poll
+        for key in sorted(failed.keys() - self._failed_ranges):
+            if isinstance(failed[key], ModbusProtocolError):
+                _LOGGER.warning(
+                    "Invalid response when polling %s %s addresses %s: %s. Please ensure that your adapter is "
+                    "correctly configured to allow multiple connections, see the instructions at "
+                    "https://github.com/nathanmarlor/foxess_modbus/wiki",
+                    self._connection,
+                    self._slave,
+                    key,
+                    failed[key],
+                )
+        self._failed_ranges = frozenset(failed)
 
         return UpdateReport(read_values, failed)
 
