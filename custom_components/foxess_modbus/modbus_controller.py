@@ -14,6 +14,7 @@ from typing import Awaitable
 from typing import Callable
 from typing import Iterable
 from typing import Iterator
+from typing import Sequence
 from typing import TypeVar
 
 from homeassistant.components.logbook import async_log_entry
@@ -82,12 +83,17 @@ class UpdateReport:
     is never in here: the poll raises ModbusConnectionError instead of reporting partial silence.
     """
 
-    values: list[tuple[int, Iterable[int | None]]]
+    values: list[tuple[int, Sequence[int | None]]]
     failed: dict[str, ModbusError]
 
     @property
     def complete(self) -> bool:
         return not self.failed
+
+    @property
+    def updated(self) -> list[str]:
+        """The address ranges which answered, keyed as ``failed`` is"""
+        return [f"{start}-{start + len(values) - 1}" for start, values in self.values]
 
 
 class ConnectionState(Enum):
@@ -173,6 +179,7 @@ class ModbusController(EntityController, UnloadController):
         self._detected_invalid_ranges = InvalidRegisterRanges()
         # Which read ranges failed the last poll, so we only complain about each as it starts failing
         self._failed_ranges: frozenset[str] = frozenset()
+        self._last_poll: UpdateReport | None = None
 
         self._inverter_capacity = connection_type_profile.inverter_model_profile.inverter_capacity(
             self.inverter_details[INVERTER_MODEL]
@@ -227,6 +234,20 @@ class ModbusController(EntityController, UnloadController):
     @property
     def inverter_details(self) -> dict[str, Any]:
         return self._inverter_details
+
+    @property
+    def last_poll(self) -> UpdateReport | None:
+        """What the most recent completed poll read, or None if none has completed"""
+        return self._last_poll
+
+    @property
+    def raw_registers(self) -> dict[str, dict[int, int | None]]:
+        """Every register this inverter reads, undecoded and keyed by address.
+
+        Includes the registers which are only read once per connection: those are exactly what an issue report needs.
+        """
+        space = self._connection_type_profile.register_type.name.lower()
+        return {space: {address: value.read_value for address, value in sorted(self._data.items())}}
 
     def read(self, address: int | list[int], *, signed: bool) -> int | None:
         # There can be a delay between writing a register, and actually reading that value back (presumably the delay
@@ -349,6 +370,7 @@ class ModbusController(EntityController, UnloadController):
             exception: Exception | None = None
             try:
                 report = await self._read_all_registers()
+                self._last_poll = report
 
                 # Write the reads which answered to _data and notify their sensors. A range which didn't answer keeps
                 # its previous values: one slow block mustn't cost us everything else the poll read
@@ -557,7 +579,7 @@ class ModbusController(EntityController, UnloadController):
             yield (start_address, read_size)
 
     async def _read_all_registers(self) -> UpdateReport:
-        read_values: list[tuple[int, Iterable[int | None]]] = []
+        read_values: list[tuple[int, Sequence[int | None]]] = []
         failed: dict[str, ModbusError] = {}
 
         read_ranges = self._create_read_ranges(self._max_read, is_initial_connection=self._read_on_connection_registers)
@@ -598,8 +620,8 @@ class ModbusController(EntityController, UnloadController):
         return UpdateReport(read_values, failed)
 
     # List of (start address, [read values starting at that address])
-    async def _read_range(self, start_address: int, num_reads: int) -> list[tuple[int, Iterable[int | None]]]:
-        read_values: list[tuple[int, Iterable[int | None]]] = []
+    async def _read_range(self, start_address: int, num_reads: int) -> list[tuple[int, Sequence[int | None]]]:
+        read_values: list[tuple[int, Sequence[int | None]]] = []
 
         _LOGGER.debug(
             "Reading addresses on %s %s: (%s, %s)",

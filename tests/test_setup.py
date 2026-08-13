@@ -29,6 +29,7 @@ from custom_components.foxess_modbus.const import MODBUS_SLAVE
 from custom_components.foxess_modbus.const import MODBUS_TYPE
 from custom_components.foxess_modbus.const import TCP
 from custom_components.foxess_modbus.const import UNIQUE_ID_PREFIX
+from custom_components.foxess_modbus.diagnostics import async_get_config_entry_diagnostics
 from custom_components.foxess_modbus.flow.flow_handler import FlowHandler
 
 _SLAVE = 247
@@ -57,6 +58,16 @@ def _state(hass: HomeAssistant, entity_id: str) -> str:
     return state.state
 
 
+def _entry(hass: HomeAssistant) -> MockConfigEntry:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=FlowHandler.VERSION,
+        data={INVERTERS: {"inverter-1": _INVERTER}, CONFIG_SAVE_TIME: dt_util.utcnow()},
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
 @pytest.mark.usefixtures("enable_custom_integrations")
 async def test_setting_up_the_entry_creates_sensors_which_read_the_inverter(hass: HomeAssistant) -> None:
     connection = MockModbusConnection()
@@ -64,12 +75,7 @@ async def test_setting_up_the_entry_creates_sensors_which_read_the_inverter(hass
     unit.holding[31002] = 1234  # pv1_power, scale 0.001
     unit.holding[32000] = [0, 4321]  # solar_energy_total, high word then low, scale 0.1
 
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        version=FlowHandler.VERSION,
-        data={INVERTERS: {"inverter-1": _INVERTER}, CONFIG_SAVE_TIME: dt_util.utcnow()},
-    )
-    entry.add_to_hass(hass)
+    entry = _entry(hass)
 
     with patch("custom_components.foxess_modbus.build_connection", return_value=connection):
         assert await hass.config_entries.async_setup(entry.entry_id)
@@ -87,6 +93,36 @@ async def test_setting_up_the_entry_creates_sensors_which_read_the_inverter(hass
         assert float(_state(hass, "sensor.pv1_power")) == pytest.approx(1.234)
         # ...including one split over two registers
         assert float(_state(hass, "sensor.solar_energy_total")) == pytest.approx(432.1)
+
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+
+@pytest.mark.usefixtures("enable_custom_integrations")
+async def test_diagnostics_dump_what_the_inverter_returned(hass: HomeAssistant) -> None:
+    connection = MockModbusConnection()
+    unit = connection.for_unit(_SLAVE)
+    unit.holding[31002] = 1234  # pv1_power
+    unit.holding[30016] = 5  # master_version, only read once per connection
+
+    entry = _entry(hass)
+
+    with patch("custom_components.foxess_modbus.build_connection", return_value=connection):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=_POLL_RATE + 1))
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+        (inverter,) = (await async_get_config_entry_diagnostics(hass, entry))["inverters"]
+
+        assert inverter["registers"]["holding"][31002] == 1234
+        # Walking the polled registers alone would drop the ones read at setup, which is what an issue report needs
+        assert inverter["registers"]["holding"][30016] == 5
+        # The last poll's outcome says which of those values are fresh
+        assert inverter["updated"]
+        assert inverter["failed"] == {}
+        assert inverter["connected"]
 
         assert await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
