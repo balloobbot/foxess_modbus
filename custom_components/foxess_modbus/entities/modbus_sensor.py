@@ -26,6 +26,7 @@ from .base_validator import BaseValidator
 from .entity_factory import ENTITY_DESCRIPTION_KWARGS
 from .entity_factory import EntityFactory
 from .inverter_model_spec import ModbusAddressesSpec
+from .modbus_entity_mixin import TOTAL_STATE_CLASSES
 from .modbus_entity_mixin import ModbusEntityMixin
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,8 +54,12 @@ class ModbusSensorDescription(SensorEntityDescription, EntityFactory):  # type: 
         register_type: RegisterType,
     ) -> Entity | None:
         addresses = self._addresses_for_inverter_model(self.addresses, inverter_model, register_type)
+        if addresses is None:
+            return None
+
         round_to = self.round_to if controller.inverter_details.get(ROUND_SENSOR_VALUES, False) else None
-        return ModbusSensor(controller, self, addresses, round_to) if addresses is not None else None
+        cls = ModbusRestoreSensor if self.state_class in TOTAL_STATE_CLASSES else ModbusSensor
+        return cls(controller, self, addresses, round_to)
 
     def serialize(self, inverter_model: Inv, register_type: RegisterType) -> dict[str, Any] | None:
         addresses = self._addresses_for_inverter_model(self.addresses, inverter_model, register_type)
@@ -71,7 +76,7 @@ class ModbusSensorDescription(SensorEntityDescription, EntityFactory):  # type: 
         }
 
 
-class ModbusSensor(ModbusEntityMixin, RestoreSensor):
+class ModbusSensor(ModbusEntityMixin, SensorEntity):
     """Sensor class."""
 
     def __init__(
@@ -166,11 +171,12 @@ class ModbusSensor(ModbusEntityMixin, RestoreSensor):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        # Nothing is polled until the first refresh, so a total would otherwise read unknown until then
-        if self.is_total and (last_data := await self.async_get_last_sensor_data()) is not None:
-            self._attr_native_value = last_data.native_value
+        await self._async_restore_value()
         # HA writes the state straight after this, so don't schedule another write of our own
         self._process_data()
+
+    async def _async_restore_value(self) -> None:
+        """Seed the value from the last run. Only a total has anything to restore, see ModbusRestoreSensor"""
 
     def _process_data(self) -> None:
         value = self._round_native_value(self._calculate_native_value())
@@ -187,3 +193,16 @@ class ModbusSensor(ModbusEntityMixin, RestoreSensor):
     @property
     def addresses(self) -> list[int]:
         return self._addresses
+
+
+class ModbusRestoreSensor(ModbusSensor, RestoreSensor):
+    """A sensor whose value survives a restart.
+
+    Only totals get this: HA writes every RestoreEntity to core.restore_state on a timer and on stop, so the sensors
+    which are never read back stay out of it.
+    """
+
+    async def _async_restore_value(self) -> None:
+        # Nothing is polled until the first refresh, and a total which read unknown until then would gap
+        if (last_data := await self.async_get_last_sensor_data()) is not None:
+            self._attr_native_value = last_data.native_value

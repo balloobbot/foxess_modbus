@@ -12,6 +12,8 @@ from ..common.types import Inv
 from ..common.types import RegisterType
 from .entity_factory import ENTITY_DESCRIPTION_KWARGS
 from .inverter_model_spec import ModbusAddressSpec
+from .modbus_entity_mixin import TOTAL_STATE_CLASSES
+from .modbus_sensor import ModbusRestoreSensor
 from .modbus_sensor import ModbusSensor
 from .modbus_sensor import ModbusSensorDescription
 
@@ -29,21 +31,16 @@ class ModbusBatterySensorDescription(ModbusSensorDescription):  # type: ignore[m
         register_type: RegisterType,
     ) -> Entity | None:
         addresses = self._addresses_for_inverter_model(self.addresses, inverter_model, register_type)
+        if addresses is None:
+            return None
+
         bms_connect_address = (
             self._address_for_inverter_model(self.bms_connect_state_address, inverter_model, register_type)
             if self.bms_connect_state_address is not None
             else None
         )
-        return (
-            ModbusBatterySensor(
-                controller,
-                self,
-                addresses,
-                bms_connect_address,
-            )
-            if addresses is not None
-            else None
-        )
+        cls = ModbusBatteryRestoreSensor if self.state_class in TOTAL_STATE_CLASSES else ModbusBatterySensor
+        return cls(controller, self, addresses, bms_connect_address)
 
 
 class ModbusBatterySensor(ModbusSensor):
@@ -86,3 +83,7 @@ class ModbusBatterySensor(ModbusSensor):
     @property
     def addresses(self) -> list[int]:
         return self._interested_addresses
+
+
+class ModbusBatteryRestoreSensor(ModbusBatterySensor, ModbusRestoreSensor):
+    """A ModbusBatterySensor whose value survives a restart"""

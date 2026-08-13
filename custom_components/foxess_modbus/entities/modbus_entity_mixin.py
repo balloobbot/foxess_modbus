@@ -27,6 +27,9 @@ from .base_validator import BaseValidator
 
 _LOGGER = logging.getLogger(__name__)
 
+# A sensor with one of these accumulates rather than measures, and so must never blank or gap
+TOTAL_STATE_CLASSES = (SensorStateClass.TOTAL, SensorStateClass.TOTAL_INCREASING)
+
 
 def get_entity_id(controller: EntityController, platform: Platform, key: str) -> str:
     """Gets the entity ID for the entity with the given platform and key"""
@@ -130,10 +133,7 @@ class ModbusEntityMixin(
 
         Read the entity's own state class, as IntegrationSensor sets _attr_state_class rather than the description.
         """
-        return getattr(self, "state_class", None) in (
-            SensorStateClass.TOTAL,
-            SensorStateClass.TOTAL_INCREASING,
-        )
+        return getattr(self, "state_class", None) in TOTAL_STATE_CLASSES
 
     @property
     def available(self) -> bool:

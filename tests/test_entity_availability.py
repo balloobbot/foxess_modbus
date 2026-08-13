@@ -1,18 +1,24 @@
 """Tests for which entities survive the inverter going away"""
 
+from typing import Callable
 from unittest.mock import MagicMock
 
 import pytest
 from homeassistant.components.sensor import SensorStateClass
 from homeassistant.core import HomeAssistant
 from homeassistant.core import State
+from homeassistant.helpers.restore_state import RestoreEntity
 from pytest_homeassistant_custom_component.common import mock_restore_cache_with_extra_data
 
+from custom_components.foxess_modbus.common.types import Inv
+from custom_components.foxess_modbus.common.types import RegisterType
 from custom_components.foxess_modbus.const import ENTITY_ID_PREFIX
 from custom_components.foxess_modbus.const import FRIENDLY_NAME
 from custom_components.foxess_modbus.const import UNIQUE_ID_PREFIX
+from custom_components.foxess_modbus.entities.inverter_model_spec import ModbusAddressesSpec
 from custom_components.foxess_modbus.entities.modbus_battery_sensor import ModbusBatterySensor
 from custom_components.foxess_modbus.entities.modbus_battery_sensor import ModbusBatterySensorDescription
+from custom_components.foxess_modbus.entities.modbus_sensor import ModbusRestoreSensor
 from custom_components.foxess_modbus.entities.modbus_sensor import ModbusSensor
 from custom_components.foxess_modbus.entities.modbus_sensor import ModbusSensorDescription
 
@@ -47,6 +53,23 @@ def _sensor(
     sensor = cls(controller, description, [_ADDRESS], None)
     sensor.schedule_update_ha_state = MagicMock()  # type: ignore[method-assign]
     return sensor
+
+
+def _plain_description(state_class: SensorStateClass | None) -> ModbusSensorDescription:
+    return ModbusSensorDescription(
+        key="test",
+        addresses=[ModbusAddressesSpec(holding=[_ADDRESS], models=Inv.KUARA_H3)],
+        state_class=state_class,
+    )
+
+
+def _battery_description(state_class: SensorStateClass | None) -> ModbusSensorDescription:
+    return ModbusBatterySensorDescription(
+        key="test",
+        addresses=[ModbusAddressesSpec(holding=[_ADDRESS], models=Inv.KUARA_H3)],
+        bms_connect_state_address=[],
+        state_class=state_class,
+    )
 
 
 def _battery_sensor(state_class: SensorStateClass, controller: MagicMock) -> ModbusBatterySensor:
@@ -134,8 +157,31 @@ async def test_a_sensor_added_after_a_poll_shows_the_current_value(hass: HomeAss
     assert sensor.native_value == 42
 
 
+@pytest.mark.parametrize(
+    ("state_class", "restored"),
+    [
+        (SensorStateClass.TOTAL, True),
+        (SensorStateClass.TOTAL_INCREASING, True),
+        (SensorStateClass.MEASUREMENT, False),
+        (None, False),
+    ],
+)
+@pytest.mark.parametrize("make_description", [_plain_description, _battery_description])
+def test_only_a_total_is_kept_across_a_restart(
+    state_class: SensorStateClass | None,
+    restored: bool,
+    make_description: Callable[[SensorStateClass | None], ModbusSensorDescription],
+) -> None:
+    description = make_description(state_class)
+
+    entity = description.create_entity_if_supported(_controller(), Inv.KUARA_H3, RegisterType.HOLDING)
+
+    # HA writes every RestoreEntity to disk on a timer, so only the sensors which are read back get to be one
+    assert isinstance(entity, RestoreEntity) == restored
+
+
 async def test_a_total_restores_its_value_across_a_restart(hass: HomeAssistant) -> None:
-    sensor = _sensor(SensorStateClass.TOTAL)
+    sensor = _sensor(SensorStateClass.TOTAL, cls=ModbusRestoreSensor)
     sensor.hass = hass
     mock_restore_cache_with_extra_data(
         hass,
