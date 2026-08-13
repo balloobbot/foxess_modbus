@@ -6,6 +6,7 @@ from typing import Any
 from typing import Protocol
 from typing import cast
 
+from homeassistant.components.sensor import SensorStateClass
 from homeassistant.const import Platform
 from homeassistant.helpers import entity_registry
 from homeassistant.helpers.entity import ABCCachedProperties
@@ -126,6 +127,15 @@ class ModbusEntityMixin(
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
+        # Totals hold their last value rather than going unavailable: blanking one gaps HA's long-term statistics and
+        # the energy dashboard, and an inverter which is off overnight is routine. The trade is that a total never
+        # reads unavailable even if the inverter never comes back; the connection status sensor carries that signal.
+        # Read the entity's own state class, as IntegrationSensor sets _attr_state_class rather than the description.
+        if getattr(self, "state_class", None) in (
+            SensorStateClass.TOTAL,
+            SensorStateClass.TOTAL_INCREASING,
+        ):
+            return True
         return self._controller.is_connected
 
     async def async_added_to_hass(self) -> None:
