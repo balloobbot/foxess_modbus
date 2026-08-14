@@ -180,6 +180,40 @@ def test_only_a_total_is_kept_across_a_restart(
     assert isinstance(entity, RestoreEntity) == restored
 
 
+@pytest.mark.parametrize(
+    ("state_class", "expected"),
+    [
+        (SensorStateClass.TOTAL_INCREASING, 100.0),
+        # A TOTAL is allowed to fall, so it follows the inverter down
+        (SensorStateClass.TOTAL, 99.5),
+    ],
+)
+def test_a_small_dip_in_a_total_increasing_is_ignored(state_class: SensorStateClass, expected: float) -> None:
+    controller = _controller()
+    sensor = _sensor(state_class, controller=controller)
+    controller.read.return_value = 100.0
+    sensor.update_callback({_ADDRESS})
+
+    # Some inverters serve a multi-register counter mid-update, so a poll occasionally reads a hair low
+    controller.read.return_value = 99.5
+    sensor.update_callback({_ADDRESS})
+
+    assert sensor.native_value == expected
+
+
+def test_a_real_reset_of_a_total_increasing_is_published() -> None:
+    controller = _controller()
+    sensor = _sensor(SensorStateClass.TOTAL_INCREASING, controller=controller)
+    controller.read.return_value = 100.0
+    sensor.update_callback({_ADDRESS})
+
+    controller.read.return_value = 0.5
+    sensor.update_callback({_ADDRESS})
+
+    # More than 1% down is the meter itself resetting, which HA has to see to keep its statistics right
+    assert sensor.native_value == 0.5
+
+
 async def test_a_total_restores_its_value_across_a_restart(hass: HomeAssistant) -> None:
     sensor = _sensor(SensorStateClass.TOTAL, cls=ModbusRestoreSensor)
     sensor.hass = hass

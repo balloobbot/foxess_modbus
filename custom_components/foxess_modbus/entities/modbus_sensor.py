@@ -180,6 +180,14 @@ class ModbusSensor(ModbusEntityMixin, SensorEntity):
 
     def _process_data(self) -> None:
         value = self._round_native_value(self._calculate_native_value())
+        last = self._attr_native_value
+        if (
+            self.is_total_increasing
+            and isinstance(value, (int, float))
+            and isinstance(last, (int, float))
+            and last * 0.99 <= value < last
+        ):
+            return  # ignore firmware issue causing minor decrease
         # A total keeps what it had: reading unknown gaps the long-term statistics just as unavailable does
         if value is not None or not self.is_total:
             self._attr_native_value = value

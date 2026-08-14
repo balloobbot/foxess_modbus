@@ -136,6 +136,11 @@ class ModbusEntityMixin(
         return getattr(self, "state_class", None) in TOTAL_STATE_CLASSES
 
     @property
+    def is_total_increasing(self) -> bool:
+        """Whether this entity's total may only ever go up. Read from the entity, as is_total is."""
+        return getattr(self, "state_class", None) is SensorStateClass.TOTAL_INCREASING
+
+    @property
     def available(self) -> bool:
         """Return True if entity is available."""
         # Totals hold their last value rather than going unavailable: blanking one gaps HA's long-term statistics and
