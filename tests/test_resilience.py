@@ -96,6 +96,48 @@ async def test_a_dead_link_abandons_the_poll(make_harness: Callable[..., Harness
     assert [(x.address, x.count) for x in harness.unit.read_events] == [(1, 2)]
 
 
+async def test_a_silent_inverter_abandons_the_poll(make_harness: Callable[..., Harness]) -> None:
+    harness = make_harness(max_read=5)
+    harness.add_entity(1, 2)
+    harness.add_entity(100, 101)
+    harness.unit.fail_requests(ModbusTimeoutError("no response"))
+
+    await harness.poll()
+
+    # An inverter asleep behind an adapter which keeps the socket open times out on every range. Nothing answered
+    # the first one, so the rest would only pay a full timeout each
+    assert [(x.address, x.count) for x in harness.unit.read_events] == [(1, 2), (1, 2), (1, 2)]
+
+
+async def test_a_timeout_is_still_contained_once_something_has_answered(make_harness: Callable[..., Harness]) -> None:
+    harness = make_harness(max_read=5)
+    harness.add_entity(1, 2)
+    harness.add_entity(100, 101)
+    harness.add_entity(200, 201)
+    harness.unit.holding[1] = [10, 11]
+    harness.unit.holding[200] = [30, 31]
+    harness.unit.fail_read(100, ModbusTimeoutError("no response"))
+
+    await harness.poll()
+
+    # The inverter proved it's there by answering 1-2, so one slow block costs only itself
+    assert harness.controller.read(1, signed=False) == 10
+    assert harness.controller.read(200, signed=False) == 30
+
+
+async def test_a_refusal_proves_the_inverter_is_there(make_harness: Callable[..., Harness]) -> None:
+    harness = make_harness(max_read=5)
+    harness.add_entity(1, 2)
+    harness.add_entity(100, 101)
+    harness.unit.holding[100] = [20, 21]
+    harness.unit.fail_read(1, ServerDeviceBusyError())
+
+    await harness.poll()
+
+    # An exception response is the inverter answering, so a timeout after it is contained rather than fatal
+    assert harness.controller.read(100, signed=False) == 20
+
+
 async def test_a_permanently_failing_range_never_marks_the_inverter_unavailable(
     make_harness: Callable[..., Harness],
 ) -> None:

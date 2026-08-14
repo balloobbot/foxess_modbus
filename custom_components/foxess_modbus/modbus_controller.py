@@ -599,6 +599,10 @@ class ModbusController(EntityController, UnloadController):
                 # The link itself is down, so the remaining ranges won't fare any better
                 raise
             except ModbusError as ex:
+                if isinstance(ex, ModbusTimeoutError) and not read_values and not failed:
+                    # Nothing has answered at all, so the inverter is silent rather than one block being slow.
+                    # Walking the remaining ranges would only pay a full timeout each
+                    raise
                 # One range going quiet (a slow block, a busy inverter) mustn't cost us the rest of the poll
                 key = f"{start_address}-{start_address + num_reads - 1}"
                 failed[key] = ex
