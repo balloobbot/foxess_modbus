@@ -77,6 +77,19 @@ class SpecialRegisterConfig:
         self.individual_read_register_ranges = individual_read_register_ranges
 
 
+# Settings, as opposed to anything the inverter measures: work mode, the charge periods, the charge/discharge
+# current limits, the SoC limits and the import/export power limits. These only change when something writes them
+# - us, the app, or the installer - so they're polled far less often than the readings, see RegisterPollType.SLOWLY.
+# Held by address rather than per entity because several of them back both a number and a back-compat sensor, and
+# both have to agree; an address no entity reads at all is covered for free.
+SETTINGS_REGISTER_RANGES: list[tuple[int, int]] = [
+    (41000, 41011),
+    (46501, 46502),
+    (46607, 46611),
+    (46616, 46617),
+    (49203, 49203),
+]
+
 H1_AC1_REGISTERS = SpecialRegisterConfig(invalid_register_ranges=[(11096, 39999)])
 # See https://github.com/nathanmarlor/foxess_modbus/discussions/503
 H3_REGISTERS = SpecialRegisterConfig(
@@ -177,6 +190,10 @@ class InverterModelConnectionTypeProfile:
 
     def is_individual_read(self, address: int) -> bool:
         return any(r[0] <= address <= r[1] for r in self.special_registers.individual_read_register_ranges)
+
+    def is_settings_register(self, address: int) -> bool:
+        """Whether this address holds a setting, rather than something the inverter measures"""
+        return any(r[0] <= address <= r[1] for r in SETTINGS_REGISTER_RANGES)
 
     def create_entities(
         self,

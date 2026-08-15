@@ -65,6 +65,12 @@ _UINT16_MAX = 65535
 
 _INVERTER_WRITE_DELAY_SECS = 5
 
+# How often to read the settings registers. They only move when something writes them, and on the models where they
+# have to be read one register at a time they're most of the poll: 12 of the 21 reads on an H1_G2, 6 of the 14 on an
+# H3. A write puts them back on the very next poll, so this is only how long a change made elsewhere - the FoxESS app,
+# the installer - takes to show up.
+_SLOW_POLL_RATE_SECS = 5 * 60
+
 
 @dataclass
 class RegisterValue:
@@ -182,6 +188,10 @@ class ModbusController(EntityController, UnloadController):
         # Registers which are only polled once per connection are read until a poll reads all of them: a poll which
         # only partly succeeded may not have got to them
         self._read_on_connection_registers = True
+        # The settings registers sit out the polls in between, counted in polls rather than seconds so they stay in
+        # step with the poll timer however it's been configured
+        self._polls_between_slow_reads = max(1, round(_SLOW_POLL_RATE_SECS / poll_rate))
+        self._polls_since_slow_read = self._polls_between_slow_reads
         # Any ranges of registers which we've detected that we can't read
         self._detected_invalid_ranges = InvalidRegisterRanges()
         # Which read ranges answered wrongly last poll, so we only complain about each as it starts doing so
@@ -353,6 +363,10 @@ class ModbusController(EntityController, UnloadController):
                     register_value.written_value = value
                     register_value.written_at = time.monotonic()
                     changed_addresses.add(address)
+            if any(self._data[address].poll_type == RegisterPollType.SLOWLY for address in changed_addresses):
+                # Read the settings back on the next poll rather than in five minutes' time. _INVERTER_WRITE_DELAY_SECS
+                # only covers the value for a moment, and after that the entity shows whatever was last read
+                self._polls_since_slow_read = self._polls_between_slow_reads
             if len(changed_addresses) > 0:
                 self._notify_update(changed_addresses)
         except Exception as ex:
@@ -375,8 +389,10 @@ class ModbusController(EntityController, UnloadController):
                 return
 
             exception: Exception | None = None
+            self._polls_since_slow_read += 1
+            include_slow = self._slow_registers_due()
             try:
-                report = await self._read_all_registers()
+                report = await self._read_all_registers(include_slow)
                 self._last_poll = report
 
                 # Write the reads which answered to _data and notify their sensors. A range which didn't answer keeps
@@ -402,6 +418,9 @@ class ModbusController(EntityController, UnloadController):
                 if report.complete:
                     # Registers which are only polled once per connection have now been read
                     self._read_on_connection_registers = False
+                    if include_slow:
+                        # Same reasoning: only start counting down once they've actually all been read
+                        self._polls_since_slow_read = 0
                 elif not report.values:
                     # Nothing at all answered. The link is up, but the inverter isn't talking to us, so treat this
                     # like any other failed poll rather than as a partial one
@@ -524,7 +543,9 @@ class ModbusController(EntityController, UnloadController):
             name = "FoxESS - Modbus"
         async_log_entry(self._hass, name=name, message=message, domain=DOMAIN)
 
-    def _create_read_ranges(self, max_read: int, is_initial_connection: bool) -> Iterable[tuple[int, int]]:
+    def _create_read_ranges(
+        self, max_read: int, is_initial_connection: bool, include_slow: bool
+    ) -> Iterable[tuple[int, int]]:
         """
         Generates a set of read ranges to cover the addresses of all registers on this inverter,
         respecting the maxumum number of registers to read at a time
@@ -545,11 +566,20 @@ class ModbusController(EntityController, UnloadController):
         # The problem as a whole looks like it's NP-hard (although I can't find a name for it).
         # We're therefore going to use a fairly simple algorithm which just makes each read as large as it can be.
 
+        # RegisterPollType is ordered from least frequent to most frequent, so the rungs due this poll are the ones
+        # at or above the least frequent one it covers
+        if is_initial_connection:
+            lowest_poll_type = RegisterPollType.ON_CONNECTION
+        elif include_slow:
+            lowest_poll_type = RegisterPollType.SLOWLY
+        else:
+            lowest_poll_type = RegisterPollType.PERIODICALLY
+
         start_address: int | None = None
         read_size = 0
         # TODO: Do we want to cache the result of this?
         for address, register_value in sorted(self._data.items()):
-            if register_value.poll_type == RegisterPollType.ON_CONNECTION and not is_initial_connection:
+            if register_value.poll_type < lowest_poll_type:
                 continue
 
             # Have we found that we can't read this register? Don't try again.
@@ -587,11 +617,19 @@ class ModbusController(EntityController, UnloadController):
         if start_address is not None:
             yield (start_address, read_size)
 
-    async def _read_all_registers(self) -> UpdateReport:
+    def _slow_registers_due(self) -> bool:
+        """Whether this poll should include the settings registers as well as the readings"""
+        return self._read_on_connection_registers or self._polls_since_slow_read >= self._polls_between_slow_reads
+
+    async def _read_all_registers(self, include_slow: bool) -> UpdateReport:
         read_values: list[tuple[int, Sequence[int | None]]] = []
         failed: dict[str, ModbusError] = {}
 
-        read_ranges = self._create_read_ranges(self._max_read, is_initial_connection=self._read_on_connection_registers)
+        read_ranges = self._create_read_ranges(
+            self._max_read,
+            is_initial_connection=self._read_on_connection_registers,
+            include_slow=include_slow,
+        )
         for start_address, num_reads in read_ranges:
             try:
                 read_values.extend(await self._read_range(start_address, num_reads))
@@ -693,11 +731,23 @@ class ModbusController(EntityController, UnloadController):
                 f"Entity {listener} address {address} overlaps an invalid range in "
                 f"{self._connection_type_profile.special_registers.invalid_register_ranges}"
             )
+            poll_type = self._poll_type_for(listener, address)
             if address not in self._data:
-                self._data[address] = RegisterValue(poll_type=listener.register_poll_type)
+                self._data[address] = RegisterValue(poll_type=poll_type)
             else:
                 # We could handle this (removing gets harder), but it shouldn't happen in practice anyway
-                assert self._data[address].poll_type == listener.register_poll_type
+                assert self._data[address].poll_type == poll_type
+
+    def _poll_type_for(self, listener: ModbusControllerEntity, address: int) -> RegisterPollType:
+        """How often to read an address: what the entity asked for, unless it's a setting.
+
+        Deciding this by address rather than taking the entity's word for it keeps the two entities which share a
+        settings address - a number and the sensor kept for back compat - from disagreeing about its poll rate.
+        """
+        poll_type = listener.register_poll_type
+        if poll_type == RegisterPollType.PERIODICALLY and self._connection_type_profile.is_settings_register(address):
+            return RegisterPollType.SLOWLY
+        return poll_type
 
     def remove_modbus_entity(self, listener: ModbusControllerEntity) -> None:
         self._update_listeners.discard(listener)

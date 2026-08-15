@@ -107,7 +107,9 @@ class RegisterPollType(IntEnum):
 
     # These must be ordered from least frequent to most frequent
     ON_CONNECTION = 0
-    PERIODICALLY = 1
+    # Settings: they only move when something writes them, so they don't need the poll rate the readings do
+    SLOWLY = 1
+    PERIODICALLY = 2
 
 
 class HassDataEntry(TypedDict):
