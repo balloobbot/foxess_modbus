@@ -64,6 +64,14 @@ Recommended installation is through [HACS][hacs]:
 
 ![Example](images/example.png)
 
+### Readings and settings
+
+Readings - power, energy, temperatures, battery state - are read on the poll rate you configure.
+
+The settings - work mode, charge periods, the charge/discharge current limits, the SoC limits and the import/export power limits - only move when something writes them, so they are read every 5 minutes instead. On the inverters which have to read them one register at a time this is most of the poll: an H1 G2 drops from 24 reads to 12, an H3 from 19 to 13.
+
+Changing a setting from Home Assistant reads it back on the next poll, so it is not affected. A change you make elsewhere - the FoxESS app, or your installer - takes up to 5 minutes to show up.
+
 ## Charge Periods
 
 If your inverter supports setting charge periods, you can use install the [Charge Periods lovelace card](https://github.com/nathanmarlor/foxess_modbus_charge_period_card):
