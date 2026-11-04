@@ -20,8 +20,8 @@ def test_tcp_params() -> None:
     assert build_params(TCP, "1.2.3.4:502") == ModbusTcpParams(host="1.2.3.4", port=502)
 
 
-def test_rtu_over_tcp_uses_rtu_framing() -> None:
-    assert build_params(RTU_OVER_TCP, "1.2.3.4:502") == ModbusTcpParams(host="1.2.3.4", port=502, framer="rtu")
+def test_rtu_over_tcp_is_a_serial_line_on_a_socket() -> None:
+    assert build_params(RTU_OVER_TCP, "1.2.3.4:502") == ModbusSerialParams(device="socket://1.2.3.4:502")
 
 
 def test_udp_params() -> None:

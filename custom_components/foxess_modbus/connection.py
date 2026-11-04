@@ -16,6 +16,8 @@ ModbusParams = ModbusTcpParams | ModbusUdpParams | ModbusSerialParams
 
 _SERIAL_BAUDRATE = 9600
 
+_SOCKET_PREFIX = "socket://"
+
 # Some serial devices need a short delay after polling. Also do this for the inverter, just in case it helps.
 _MESSAGE_SPACING = 30 / 1000
 
@@ -53,12 +55,13 @@ def build_params(protocol: str, host: str) -> ModbusParams:
 
     if protocol == SERIAL:
         return ModbusSerialParams(device=host, baudrate=_SERIAL_BAUDRATE)
+    if protocol == RTU_OVER_TCP:
+        # RTU over TCP is a serial line forwarded over a socket
+        return ModbusSerialParams(device=f"{_SOCKET_PREFIX}{host}")
 
     hostname, _, port = host.partition(":")
     if protocol == TCP:
         return ModbusTcpParams(host=hostname, port=int(port))
-    if protocol == RTU_OVER_TCP:
-        return ModbusTcpParams(host=hostname, port=int(port), framer="rtu")
     if protocol == UDP:
         return ModbusUdpParams(host=hostname, port=int(port))
     raise AssertionError(f"Unknown protocol {protocol}")
@@ -68,6 +71,7 @@ def describe(params: ModbusParams) -> str:
     """A short description of what a connection talks to, used in logs and error messages"""
 
     if isinstance(params, ModbusSerialParams):
+        if params.device.startswith(_SOCKET_PREFIX):
+            return f"{RTU_OVER_TCP}://{params.device.removeprefix(_SOCKET_PREFIX)}"
         return params.device
-    protocol = RTU_OVER_TCP if isinstance(params, ModbusTcpParams) and params.framer == "rtu" else params.endpoint[0]
-    return f"{protocol}://{params.host}:{params.port}"
+    return f"{params.endpoint[0]}://{params.host}:{params.port}"
