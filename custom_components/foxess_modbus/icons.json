@@ -1,8 +1,40 @@
 {
+  "entity": {
+    "sensor": {
+      "pv_power": { "default": "mdi:solar-power-variant" },
+      "pv_string_power": { "default": "mdi:solar-power-variant-outline" },
+      "solar_energy_today": { "default": "mdi:solar-power" },
+      "solar_energy_total": { "default": "mdi:solar-power" },
+      "faults": { "default": "mdi:alert-circle-outline" },
+      "inverter_state": { "default": "mdi:state-machine" },
+      "grid_status": { "default": "mdi:transmission-tower" },
+      "master_version": { "default": "mdi:source-branch" },
+      "slave_version": { "default": "mdi:source-branch" },
+      "manager_version": { "default": "mdi:source-branch" }
+    },
+    "select": {
+      "work_mode": { "default": "mdi:cog-transfer" },
+      "force_charge_mode": { "default": "mdi:battery-charging-high" }
+    },
+    "switch": {
+      "charge_period_force_charge": {
+        "default": "mdi:battery-lock-open",
+        "state": { "on": "mdi:battery-lock" }
+      },
+      "charge_period_charge_from_grid": {
+        "default": "mdi:battery",
+        "state": { "on": "mdi:battery-charging" }
+      }
+    },
+    "time": {
+      "charge_period_start": { "default": "mdi:clock-start" },
+      "charge_period_end": { "default": "mdi:clock-end" }
+    }
+  },
   "services": {
-    "read_registers": "mdi:export",
-    "write_registers": "mdi:import",
-    "update_charge_period": "mdi:timer-outline",
-    "update_all_charge_periods": "mdi:timer-outline"
+    "read_registers": { "service": "mdi:database-search" },
+    "write_registers": { "service": "mdi:database-edit" },
+    "update_charge_period": { "service": "mdi:battery-clock" },
+    "update_all_charge_periods": { "service": "mdi:battery-clock" }
   }
 }

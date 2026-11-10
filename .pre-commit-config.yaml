@@ -1,4 +1,4 @@
-exclude: ^custom_components\/foxess_modbus\/vendor
+exclude: ^custom_components\/foxess_modbus\/foxess_inverter
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v3.3.0

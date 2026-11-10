@@ -1,192 +1,78 @@
 {
   "config": {
     "step": {
-      "select_adapter_type": {
-        "description": "How do you connect to your inverter?",
+      "user": {
+        "title": "How is the inverter connected?",
         "data": {
-          "adapter_type": "Adapter Type"
+          "adapter_type": "Connection"
         }
       },
-      "select_adapter_model": {
-        "description": "Choose your adapter model. This lets us use settings tailored to your adapter. If you don't see your model, choose \"Other\" and let us know: {discussions_link}.",
+      "adapter": {
+        "title": "Which adapter?",
         "data": {
-          "adapter_model": "Adapter Model"
+          "adapter": "Adapter"
         }
       },
-      "tcp_adapter": {
-        "description": "Set up your adapter by following the instructions at {setup_link}.",
+      "network": {
+        "description": "Set up the adapter as described at {setup_link}.",
         "data": {
           "protocol": "Protocol",
-          "protocol_with_recommendation": "Protocol",
-          "lan_connection_host": "Inverter hostname / IP address",
-          "adapter_host": "Adapter hostname / IP address",
-          "adapter_port": "Adapter port",
-          "modbus_slave": "Inverter slave ID"
+          "host": "Host",
+          "port": "Port",
+          "unit_id": "Unit ID"
         },
         "data_description": {
-          "protocol_with_recommendation": "We recommend using {recommended_protocol} with this adapter, see the link above",
-          "modbus_slave": "This can be set from Settings -> Communication in the inverter menu"
+          "host": "The hostname or IP address of the adapter, or of the inverter for a direct connection.",
+          "unit_id": "Set on the inverter under Settings, Communication. Usually 247."
         }
       },
-      "serial_adapter": {
-        "description": "Set up your adapter by following the instructions at {setup_link}.",
+      "serial": {
+        "description": "Set up the adapter as described at {setup_link}.",
         "data": {
-          "serial_device": "USB serial device",
-          "modbus_slave": "Inverter slave ID"
+          "device": "Serial port",
+          "unit_id": "Unit ID"
         },
         "data_description": {
-          "modbus_slave": "This can be set from Settings -> Communication in the inverter menu"
-        }
-      },
-      "friendly_name": {
-        "description": "If you have more than one inverter, you can give this one a name to tell them apart. If you only have one inverter, you can leave this empty!",
-        "data": {
-          "friendly_name": "Friendly Name",
-          "autogenerate_entity_id_prefix": "Use the Friendly Name to auto-generate a prefix for all entity IDs",
-          "entity_id_prefix": "Entity ID Prefix"
-        },
-        "data_description": {
-          "friendly_name": "This is added to the end of all entity names, e.g. 'PV1 Power (Your Friendly Name)'",
-          "entity_id_prefix": "Added as a prefix to all of this inverter's entity IDs"
-        }
-      },
-      "add_another_inverter": {
-        "description": "Set-up complete. Do you want to add another inverter?",
-        "menu_options": {
-          "energy": "I'm done",
-          "select_adapter_type": "Add another inverter"
-        }
-      },
-      "energy": {
-        "description": "Warning: this will overwrite any existing settings.\nWe recommend checking the configuration at {energy_link}.",
-        "data": {
-          "energy_dashboard": "Automatically configure the Energy Dashboard"
+          "unit_id": "Set on the inverter under Settings, Communication. Usually 247."
         }
       }
     },
     "error": {
-      "already_in_progress": "Configuration flow is already in progress",
-      "invalid_hostname": "Hostname / IP address \"{hostname}\" is not valid. Use an IP address (e.g. '192.168.0.10') or a hostname (e.g. 'mydevice' / 'mydevice.local')",
-      "duplicate_connection_details": "You have already set up an inverter with this address",
-      "duplicate_friendly_name": "One of your other inverters has this friendly name. Please specify another",
-      "duplicate_entity_id_prefix": "Please enter a unique entity ID prefix",
-      "unable_to_generate_entity_id_prefix": "Unable to generate a unique entity ID prefix. Please specify one manually",
-      "invalid_entity_id_prefix": "Entity ID prefix must contain only lower-case letters, numbers and underscores, and must not begin/end with an underscore",
-      "inverter_model_not_supported": "Inverter model \"{not_supported_model}\" is not supported",
-      "unable_to_connect_to_adapter": "Unable to connect to your adapter. Ensure that the adapter is properly configured (see the setup link above) and the connection details are correct, then try again. Details: {error_details}",
-      "unable_to_connect_to_inverter": "Unable to connect to your inverter. Make sure the connection details are correct and try again. Details: {error_details}",
-      "adapter_unable_to_communicate_with_inverter": "The adapter was unable to connect to the inverter. Ensure the adapter is properly configured and is correctly wired to your inverter (see the setup link above), then try again. Details: {error_details}",
-      "unable_to_communicate_with_inverter": "Error communicating with your inverter. Ensure that it has a compatible firmware version. Details: {error_details}",
-      "other_adapter_error": "Error connecting to your adapter or inverter. Ensure the adapter is properly configured and is correctly wired to your inverter (see the setup link above), then try again. Details: {error_details}",
-      "other_inverter_error": "Error connecting to your inverter. Details: {error_details}"
+      "cannot_connect": "Failed to connect to the adapter.",
+      "cannot_communicate": "The adapter answered, but the inverter did not. Check the wiring and the unit ID.",
+      "unsupported_model": "The inverter reports model \"{model}\", which this integration does not support.",
+      "link_in_use": "Another integration uses this adapter with different settings."
     },
     "abort": {
-      "already_configured": "You can only set up this integration once. If you need to reconfigure, click \"CONFIGURE\" or delete and then add again."
+      "already_configured": "This inverter is already configured.",
+      "reconfigure_successful": "The connection was changed."
     }
   },
   "options": {
     "step": {
-      "select_inverter": {
-        "description": "Select inverter to configure.",
+      "init": {
         "data": {
-          "inverter": ""
-        }
-      },
-      "inverter_options_category": {
-        "menu_options": {
-          "select_adapter_type": "Network settings",
-          "version_settings": "Version settings",
-          "inverter_advanced_options": "Advanced settings"
-        }
-      },
-      "select_adapter_type": {
-        "description": "How do you connect to your inverter?",
-        "data": {
-          "adapter_type": ""
-        }
-      },
-      "select_adapter_model": {
-        "description": "Choose your adapter model. This lets us use settings tailored to your adapter. If you don't see your model, choose \"Other\" and let us know: {discussions_link}.",
-        "data": {
-          "adapter_id": ""
-        }
-      },
-      "tcp_adapter": {
-        "description": "Set up your adapter by following the instructions at {setup_link}.",
-        "data": {
-          "protocol": "Protocol",
-          "protocol_with_recommendation": "Protocol",
-          "lan_connection_host": "Inverter hostname / IP address",
-          "adapter_host": "Adapter hostname / IP address",
-          "adapter_port": "Adapter port",
-          "modbus_slave": "Inverter slave ID"
+          "poll_interval": "Poll interval",
+          "max_read": "Registers per read",
+          "round_sensor_values": "Round sensor values"
         },
         "data_description": {
-          "protocol_with_recommendation": "We recommend using {recommended_protocol} with this adapter, see the link above",
-          "modbus_slave": "This can be set from Settings -> Communication in the inverter menu"
-        }
-      },
-      "serial_adapter": {
-        "description": "Set up your adapter by following the instructions at {setup_link}.",
-        "data": {
-          "serial_device": "USB serial device",
-          "modbus_slave": "Inverter slave ID"
-        },
-        "data_description": {
-          "modbus_slave": "This can be set from Settings -> Communication in the inverter menu"
-        }
-      },
-      "version_settings": {
-        "description": "Version settings for \"{inverter}\"",
-        "data": {
-          "version": "Inverter's Manager Version"
-        },
-        "data_description": {
-          "version": "If you're running old inverter firmware, you may be able to select it here"
-        }
-      },
-      "inverter_advanced_options": {
-        "description": "Options for \"{inverter}\".",
-        "data": {
-          "round_sensor_values": "Round sensor values",
-          "poll_rate": "Poll rate (seconds)",
-          "max_read": "Max read"
-        },
-        "data_description": {
-          "round_sensor_values": "Reduces Home Assistant database size by rounding and filtering sensor values",
-          "poll_rate": "The default for your adapter type is {default_poll_rate} seconds. Leave empty to use the default",
-          "max_read": "The default for your adapter type is {default_max_read}. Leave empty to use the default. Warning: Look at the debug log for problems if you increase this!"
+          "poll_interval": "Seconds between polls. Empty uses the adapter default of {default_poll_interval}.",
+          "max_read": "The most registers to read at once. Empty uses the adapter default of {default_max_read}.",
+          "round_sensor_values": "Smooth and round the readings, to store fewer state changes."
         }
       }
-    },
-    "error": {
-      "invalid_hostname": "Hostname / IP address \"{hostname}\" is not valid. Use an IP address (e.g. '192.168.0.10') or a hostname (e.g. 'mydevice' / 'mydevice.local')",
-      "duplicate_connection_details": "You have already set up an inverter with this address",
-      "inverter_model_not_supported": "Inverter model \"{not_supported_model}\" is not supported",
-      "unable_to_connect_to_adapter": "Unable to connect to your adapter. Ensure that the adapter is properly configured (see the setup link above) and the connection details are correct, then try again. Details: {error_details}",
-      "unable_to_connect_to_inverter": "Unable to connect to your inverter. Make sure the connection details are correct and try again. Details: {error_details}",
-      "adapter_unable_to_communicate_with_inverter": "The adapter was unable to connect to the inverter. Ensure the adapter is properly configured and is correctly wired to your inverter (see the setup link above), then try again. Details: {error_details}",
-      "unable_to_communicate_with_inverter": "Error communicating with your inverter. Ensure that it has a compatible firmware version. Details: {error_details}",
-      "other_adapter_error": "Error connecting to your adapter or inverter. Ensure the adapter is properly configured and is correctly wired to your inverter (see the setup link above), then try again. Details: {error_details}",
-      "other_inverter_error": "Error connecting to your inverter. Details: {error_details}"
     }
   },
   "selector": {
-    "inverter_adapter_types": {
+    "adapter_type": {
       "options": {
-        "direct": "Direct LAN Connection",
-        "serial": "USB to RS485 Adapter",
-        "network": "Ethernet to Modbus/RS485 Adapter"
+        "direct": "Direct LAN connection",
+        "serial": "USB to RS485 adapter",
+        "network": "Ethernet to RS485 adapter"
       }
     },
-    "network_protocols": {
-      "options": {
-        "tcp": "Modbus TCP",
-        "udp": "Modbus UDP",
-        "rtu_over_tcp": "Modbus RTU over TCP"
-      }
-    },
-    "inverter_adapter_models": {
+    "adapter": {
       "options": {
         "dsd_tech_sh_u10": "DSD TECH SH-U10",
         "runcci_yun_usb_to_rs485_converter": "RUNCCI-YUN USB to RS485 Converter",
@@ -195,21 +81,542 @@
         "elfin_ew11": "Elfin EW11/EW11A",
         "usr_tcp232_304": "USR-TCP232-304",
         "usr_tcp232_410s": "USR-TCP232-410s",
-        "usr_w610": "USR-W610",
+        "usr_w610": "USR-W610 (UDP recommended)",
         "waveshare_rs485_to_eth_b": "Waveshare Modbus RTU Relay",
         "ebyte_na111_series": "Ebyte NA111 series (NA111 / -A / -E / -M)",
         "network_other": "Other"
       }
+    },
+    "protocol": {
+      "options": {
+        "tcp": "Modbus TCP",
+        "udp": "Modbus UDP",
+        "rtu_over_tcp": "Modbus RTU over TCP"
+      }
+    },
+    "register_type": {
+      "options": {
+        "input": "Input",
+        "holding": "Holding"
+      }
+    },
+    "charge_period": {
+      "options": {
+        "1": "Charge period 1",
+        "2": "Charge period 2"
+      }
     }
   },
-  "issues": {
-    "connection_error": {
-      "title": "Connection Error",
-      "description": "Error connecting to inverter (friendly name: \"{friendly_name}\"). {error}"
+  "entity": {
+    "binary_sensor": {
+      "connection": {
+        "name": "Connection"
+      }
     },
-    "invalid_ranges": {
-      "title": "Invalid registers detected",
-      "description": "Inverter (friendly name: \"{friendly_name}\") has some registers which we expect to read, but can't. Details: {ranges}. Please visit the link below for more information."
+    "number": {
+      "max_charge_current": {
+        "name": "Max charge current"
+      },
+      "max_discharge_current": {
+        "name": "Max discharge current"
+      },
+      "min_soc": {
+        "name": "Min state of charge"
+      },
+      "max_soc": {
+        "name": "Max state of charge"
+      },
+      "min_soc_on_grid": {
+        "name": "Min state of charge on grid"
+      },
+      "import_power_limit": {
+        "name": "Import power limit"
+      },
+      "export_power_limit": {
+        "name": "Export power limit"
+      },
+      "force_charge_power": {
+        "name": "Force charge power"
+      },
+      "force_discharge_power": {
+        "name": "Force discharge power"
+      },
+      "force_charge_max_soc": {
+        "name": "Force charge max state of charge"
+      }
+    },
+    "select": {
+      "work_mode": {
+        "name": "Work mode",
+        "state": {
+          "self_use": "Self use",
+          "feed_in_first": "Feed-in first",
+          "back_up": "Back-up",
+          "peak_shaving": "Peak shaving",
+          "force_charge": "Force charge",
+          "force_discharge": "Force discharge"
+        }
+      },
+      "force_charge_mode": {
+        "name": "Force charge mode",
+        "state": {
+          "disable": "Off",
+          "force_charge": "Force charge",
+          "force_discharge": "Force discharge"
+        }
+      }
+    },
+    "sensor": {
+      "pv_string_voltage": {
+        "name": "PV{string} voltage"
+      },
+      "pv_string_current": {
+        "name": "PV{string} current"
+      },
+      "pv_string_power": {
+        "name": "PV{string} power"
+      },
+      "pv_power": {
+        "name": "PV power"
+      },
+      "pv_string_energy": {
+        "name": "PV{string} energy"
+      },
+      "grid_voltage": {
+        "name": "Grid voltage"
+      },
+      "grid_voltage_phase": {
+        "name": "Grid voltage {phase}"
+      },
+      "grid_frequency": {
+        "name": "Grid frequency"
+      },
+      "inverter_current": {
+        "name": "Inverter current"
+      },
+      "inverter_current_phase": {
+        "name": "Inverter current {phase}"
+      },
+      "inverter_power": {
+        "name": "Inverter power"
+      },
+      "inverter_power_phase": {
+        "name": "Inverter power {phase}"
+      },
+      "inverter_reactive_power": {
+        "name": "Inverter reactive power"
+      },
+      "inverter_reactive_power_phase": {
+        "name": "Inverter reactive power {phase}"
+      },
+      "inverter_apparent_power": {
+        "name": "Inverter apparent power"
+      },
+      "inverter_apparent_power_phase": {
+        "name": "Inverter apparent power {phase}"
+      },
+      "grid_ct_power": {
+        "name": "Grid CT power"
+      },
+      "grid_ct_power_phase": {
+        "name": "Grid CT power {phase}"
+      },
+      "feed_in_power": {
+        "name": "Feed-in power"
+      },
+      "feed_in_power_phase": {
+        "name": "Feed-in power {phase}"
+      },
+      "grid_consumption_power": {
+        "name": "Grid consumption power"
+      },
+      "grid_consumption_power_phase": {
+        "name": "Grid consumption power {phase}"
+      },
+      "ct2_power": {
+        "name": "CT2 power"
+      },
+      "ct2_power_phase": {
+        "name": "CT2 power {phase}"
+      },
+      "grid_ct_reactive_power": {
+        "name": "Grid CT reactive power"
+      },
+      "grid_ct_reactive_power_phase": {
+        "name": "Grid CT reactive power {phase}"
+      },
+      "grid_ct_apparent_power": {
+        "name": "Grid CT apparent power"
+      },
+      "grid_ct_apparent_power_phase": {
+        "name": "Grid CT apparent power {phase}"
+      },
+      "grid_ct_power_factor": {
+        "name": "Grid CT power factor"
+      },
+      "grid_ct_power_factor_phase": {
+        "name": "Grid CT power factor {phase}"
+      },
+      "load_power": {
+        "name": "Load power"
+      },
+      "load_power_phase": {
+        "name": "Load power {phase}"
+      },
+      "eps_voltage": {
+        "name": "EPS voltage"
+      },
+      "eps_voltage_phase": {
+        "name": "EPS voltage {phase}"
+      },
+      "eps_current": {
+        "name": "EPS current"
+      },
+      "eps_current_phase": {
+        "name": "EPS current {phase}"
+      },
+      "eps_power": {
+        "name": "EPS power"
+      },
+      "eps_power_phase": {
+        "name": "EPS power {phase}"
+      },
+      "eps_reactive_power": {
+        "name": "EPS reactive power"
+      },
+      "eps_apparent_power": {
+        "name": "EPS apparent power"
+      },
+      "eps_frequency": {
+        "name": "EPS frequency"
+      },
+      "inverter_temperature": {
+        "name": "Inverter temperature"
+      },
+      "ambient_temperature": {
+        "name": "Ambient temperature"
+      },
+      "battery_voltage": {
+        "name": "Inverter battery voltage"
+      },
+      "battery_voltage_battery": {
+        "name": "Inverter battery {battery} voltage"
+      },
+      "battery_current": {
+        "name": "Inverter battery current"
+      },
+      "battery_current_battery": {
+        "name": "Inverter battery {battery} current"
+      },
+      "battery_power": {
+        "name": "Inverter battery power"
+      },
+      "battery_power_battery": {
+        "name": "Inverter battery {battery} power"
+      },
+      "battery_charge_power": {
+        "name": "Battery charge power"
+      },
+      "battery_charge_power_battery": {
+        "name": "Battery {battery} charge power"
+      },
+      "battery_discharge_power": {
+        "name": "Battery discharge power"
+      },
+      "battery_discharge_power_battery": {
+        "name": "Battery {battery} discharge power"
+      },
+      "bms_voltage": {
+        "name": "Battery voltage"
+      },
+      "bms_voltage_battery": {
+        "name": "Battery {battery} voltage"
+      },
+      "bms_current": {
+        "name": "Battery current"
+      },
+      "bms_current_battery": {
+        "name": "Battery {battery} current"
+      },
+      "battery_soc": {
+        "name": "Battery state of charge"
+      },
+      "battery_soc_battery": {
+        "name": "Battery {battery} state of charge"
+      },
+      "battery_soh": {
+        "name": "Battery state of health"
+      },
+      "battery_soh_battery": {
+        "name": "Battery {battery} state of health"
+      },
+      "battery_temperature": {
+        "name": "Battery temperature"
+      },
+      "battery_temperature_battery": {
+        "name": "Battery {battery} temperature"
+      },
+      "bms_cell_temperature_high": {
+        "name": "BMS highest cell temperature"
+      },
+      "bms_cell_temperature_high_battery": {
+        "name": "BMS {battery} highest cell temperature"
+      },
+      "bms_cell_temperature_low": {
+        "name": "BMS lowest cell temperature"
+      },
+      "bms_cell_temperature_low_battery": {
+        "name": "BMS {battery} lowest cell temperature"
+      },
+      "bms_cell_voltage_high": {
+        "name": "BMS highest cell voltage"
+      },
+      "bms_cell_voltage_high_battery": {
+        "name": "BMS {battery} highest cell voltage"
+      },
+      "bms_cell_voltage_low": {
+        "name": "BMS lowest cell voltage"
+      },
+      "bms_cell_voltage_low_battery": {
+        "name": "BMS {battery} lowest cell voltage"
+      },
+      "bms_max_charge_current": {
+        "name": "BMS charge current limit"
+      },
+      "bms_max_discharge_current": {
+        "name": "BMS discharge current limit"
+      },
+      "bms_cycle_count": {
+        "name": "BMS cycle count"
+      },
+      "bms_energy_remaining": {
+        "name": "BMS energy remaining"
+      },
+      "bms_energy_remaining_battery": {
+        "name": "BMS {battery} energy remaining"
+      },
+      "bms_energy_throughput": {
+        "name": "BMS energy throughput"
+      },
+      "solar_energy_today": {
+        "name": "Solar generation today"
+      },
+      "solar_energy_total": {
+        "name": "Solar generation"
+      },
+      "battery_charge_energy_today": {
+        "name": "Battery charge today"
+      },
+      "battery_charge_energy_total": {
+        "name": "Battery charge"
+      },
+      "battery_discharge_energy_today": {
+        "name": "Battery discharge today"
+      },
+      "battery_discharge_energy_total": {
+        "name": "Battery discharge"
+      },
+      "feed_in_energy_today": {
+        "name": "Feed-in today"
+      },
+      "feed_in_energy_total": {
+        "name": "Feed-in"
+      },
+      "grid_consumption_energy_today": {
+        "name": "Grid consumption today"
+      },
+      "grid_consumption_energy_total": {
+        "name": "Grid consumption"
+      },
+      "yield_energy_today": {
+        "name": "Yield today"
+      },
+      "yield_energy_total": {
+        "name": "Yield"
+      },
+      "input_energy_today": {
+        "name": "Input energy today"
+      },
+      "input_energy_total": {
+        "name": "Input energy"
+      },
+      "load_energy_today": {
+        "name": "Load energy today"
+      },
+      "load_energy_total": {
+        "name": "Load energy"
+      },
+      "inverter_state": {
+        "name": "Inverter state",
+        "state": {
+          "self_test": "Self test",
+          "waiting": "Waiting",
+          "checking": "Checking",
+          "on_grid": "On grid",
+          "off_grid": "Off grid",
+          "recoverable_fault": "Recoverable fault",
+          "unrecoverable_fault": "Unrecoverable fault",
+          "standby": "Standby",
+          "fault": "Fault"
+        }
+      },
+      "grid_status": {
+        "name": "Grid status",
+        "state": {
+          "grid_present": "Grid present",
+          "unknown": "Unknown",
+          "grid_lost": "Grid lost"
+        }
+      },
+      "faults": {
+        "name": "Faults"
+      },
+      "state_code": {
+        "name": "Inverter state code"
+      },
+      "master_version": {
+        "name": "Master firmware"
+      },
+      "slave_version": {
+        "name": "Slave firmware"
+      },
+      "manager_version": {
+        "name": "Manager firmware"
+      }
+    },
+    "switch": {
+      "charge_period_force_charge": {
+        "name": "Charge period {period} force charge"
+      },
+      "charge_period_charge_from_grid": {
+        "name": "Charge period {period} charge from grid"
+      }
+    },
+    "time": {
+      "charge_period_start": {
+        "name": "Charge period {period} start"
+      },
+      "charge_period_end": {
+        "name": "Charge period {period} end"
+      }
+    }
+  },
+  "exceptions": {
+    "no_answer": {
+      "message": "The inverter did not answer."
+    },
+    "communication_error": {
+      "message": "Error communicating with the inverter: {error}"
+    },
+    "nothing_answered": {
+      "message": "The inverter answered none of the reads."
+    },
+    "unsupported_model": {
+      "message": "The inverter reports model \"{model}\", which this integration does not support."
+    },
+    "write_failed": {
+      "message": "Failed to write to the inverter: {error}"
+    },
+    "read_failed": {
+      "message": "Failed to read from the inverter: {error}"
+    },
+    "charge_period_unknown": {
+      "message": "Charge period {period} has not been read yet."
+    },
+    "charge_period_empty": {
+      "message": "Charge period {period} starts and ends at the same time."
+    },
+    "charge_period_needs_times": {
+      "message": "Give a start and an end to enable charge period {period}."
+    },
+    "no_charge_periods": {
+      "message": "This inverter has no charge periods."
+    }
+  },
+  "services": {
+    "read_registers": {
+      "name": "Read registers",
+      "description": "Reads registers from the inverter, for debugging.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Inverter",
+          "description": "The inverter to target."
+        },
+        "start_address": {
+          "name": "Start address",
+          "description": "The first register to read."
+        },
+        "count": {
+          "name": "Count",
+          "description": "How many registers to read."
+        },
+        "type": {
+          "name": "Type",
+          "description": "Input or holding registers."
+        }
+      }
+    },
+    "write_registers": {
+      "name": "Write registers",
+      "description": "Writes holding registers of the inverter.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Inverter",
+          "description": "The inverter to target."
+        },
+        "start_address": {
+          "name": "Start address",
+          "description": "The first register to write."
+        },
+        "values": {
+          "name": "Values",
+          "description": "Comma-separated values to write, one per register."
+        }
+      }
+    },
+    "update_charge_period": {
+      "name": "Update charge period",
+      "description": "Sets one of the two charge periods.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Inverter",
+          "description": "The inverter to target."
+        },
+        "charge_period": {
+          "name": "Charge period",
+          "description": "Which charge period to set."
+        },
+        "enable_force_charge": {
+          "name": "Force charge",
+          "description": "Whether the battery charges in this period."
+        },
+        "enable_charge_from_grid": {
+          "name": "Charge from grid",
+          "description": "Whether the battery also charges from the grid in this period, up to the max state of charge. If not, it charges from PV only and does not discharge."
+        },
+        "start": {
+          "name": "Start",
+          "description": "When the period starts. Needed to force charge."
+        },
+        "end": {
+          "name": "End",
+          "description": "When the period ends. Needed to force charge."
+        }
+      }
+    },
+    "update_all_charge_periods": {
+      "name": "Update all charge periods",
+      "description": "Sets both charge periods in one write.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Inverter",
+          "description": "The inverter to target."
+        },
+        "charge_periods": {
+          "name": "Charge periods",
+          "description": "Both periods, each with enable_force_charge, enable_charge_from_grid, start and end."
+        }
+      }
     }
   }
 }

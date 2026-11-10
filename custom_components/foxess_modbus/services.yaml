@@ -1,170 +1,100 @@
----
 read_registers:
-  name: Read Registers
-  description: >
-    Read one or more registers, for debugging purposes
   fields:
-    inverter:
-      name: Inverter
-      description: Which inverter to target. Pass a device ID or unique friendly name.
+    config_entry_id:
       required: true
-      default: "''"
-      example: "''"
       selector:
-        device:
+        config_entry:
           integration: foxess_modbus
     start_address:
-      name: Start Address
-      description: Start address to write to
       required: true
       example: 31000
-      default: 31000
       selector:
         number:
+          min: 0
+          max: 65535
           mode: box
     count:
-      name: Count
-      description: Number of registers to read
       required: true
-      example: 1
       default: 1
       selector:
         number:
+          min: 1
+          max: 125
           mode: box
     type:
-      name: Type
-      description: Type of register to read
       required: true
-      default: input
+      default: holding
       selector:
         select:
+          translation_key: register_type
           options:
             - input
             - holding
 write_registers:
-  name: Write Registers
-  description: >
-    Writes one or more registers
   fields:
-    inverter:
-      name: Inverter
-      description: Which inverter to target. Pass a device ID or unique friendly name.
+    config_entry_id:
       required: true
-      default: "''"
-      example: "''"
       selector:
-        device:
+        config_entry:
           integration: foxess_modbus
     start_address:
-      name: Start Address
-      description: Start address to write to
       required: true
       example: 41001
-      default: 1
       selector:
         number:
+          min: 0
+          max: 65535
           mode: box
     values:
-      name: Values
-      description: Comma seperated list of values to write
       required: true
       example: "1, 2, 3"
-      default: "1, 2, 3"
       selector:
         text:
 update_charge_period:
-  name: Update Charge Period
-  description: >
-    Updates one of the two charge periods (if supported by your inverter, see https://github.com/nathanmarlor/foxess_modbus/wiki/Supported-Features)
   fields:
-    inverter:
-      name: Inverter
-      description: Which inverter to target. Pass a device ID or unique friendly name. If your inverter isn't listed here, it probably isn't supported.
+    config_entry_id:
       required: true
-      default: "''"
-      example: "''"
       selector:
-        device:
+        config_entry:
           integration: foxess_modbus
-          entity:
-            # Only charge periods provide binary_sensors with class power, for charge period on/off
-            domain: "binary_sensor"
-            device_class: "power"
     charge_period:
-      name: Charge Period
-      description: Which charge period to update.
       required: true
-      example: "'1'"
       selector:
         select:
+          translation_key: charge_period
           options:
-            - label: Time period 1
-              value: "1"
-            - label: Time period 2
-              value: "2"
+            - "1"
+            - "2"
     enable_force_charge:
-      name: Enable force charge
-      description: Whether to enable this force charge window.
       required: true
-      example: true
       selector:
         boolean:
     enable_charge_from_grid:
-      name: Enable charge from grid
-      description: >
-        If set, the battery will charge from PV and the grid during this force charge window, until it reaches Max SoC.
-        If unset, the battery will charge from PV but not the grid during this force charge window, and won't discharge.
       required: true
-      example: false
       selector:
         boolean:
     start:
-      name: Period Start
-      description: >
-        The start of the charge period. This is only required if 'Enable force charge' is selected.
-      required: true
-      default: "02:00:00"
-      example: "02:00:00"
+      example: "00:30"
       selector:
         time:
     end:
-      name: Period End
-      description: >
-        The end of the charge period. This is only required of 'Enable force charge' is selected.
-
-        This may not be less than or equal to 'Start' (time periods may not span midnight).
-      required: true
-      default: "05:00:00"
-      example: "05:00:00"
+      example: "04:30"
       selector:
         time:
 update_all_charge_periods:
-  name: Update All Charge Periods
-  description: Sets all charge periods in one service call (if supported by your inverter, see https://github.com/nathanmarlor/foxess_modbus/wiki/Supported-Features). The service "Update Charge Period" is easier for end-users to use.
   fields:
-    inverter:
-      name: Inverter
-      description: Which inverter to target. Pass a device ID or unique friendly name. If your inverter isn't listed here, it probably isn't supported.
+    config_entry_id:
       required: true
-      default: "''"
-      example: "''"
       selector:
-        device:
+        config_entry:
           integration: foxess_modbus
-          entity:
-            # Only charge periods provide binary_sensors with class power, for charge period on/off
-            domain: "binary_sensor"
-            device_class: "power"
     charge_periods:
-      name: Charge Periods
-      description: Charge periods to set. This should be an array of objects, one for each charge period. All charge periods must be specified. See the example data
       required: true
-      default: ""
-      example: >
+      example: |
         - enable_force_charge: true
           enable_charge_from_grid: true
-          start: "01:00"
-          end: "03:00"
+          start: "00:30"
+          end: "04:30"
         - enable_force_charge: false
           enable_charge_from_grid: false
       selector:

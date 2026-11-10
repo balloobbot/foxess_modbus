@@ -58,6 +58,18 @@ Recommended installation is through [HACS][hacs]:
 4. Search for and select 'FoxESS - Modbus' (If the integration is not found, empty your browser cache and reload the page)
 5. Proceed with the configuration
 
+## Upgrading from earlier versions
+
+This version is a rewrite on Home Assistant's [modbus-connection](https://developers.home-assistant.io/docs/modbus/introduction) and needs Home Assistant 2026.10 or later. It does not take over existing configuration: remove the old entry and add each inverter again.
+
+- Each inverter is its own config entry and device. Entity names follow the device name; the friendly name and entity ID prefix options are gone.
+- The firmware version is read from the inverter. The "Version settings" option is gone.
+- Charge periods are time and switch entities that you can change directly. The services remain.
+- The services target an inverter by its config entry.
+- A connection binary sensor replaces the connection status sensor and its repair issue.
+- Settings are numbers and selects only, without a duplicate sensor.
+- The register map lives in the [foxess-inverter](https://github.com/balloobbot/foxess-inverter) library, which this integration vendors in `custom_components/foxess_modbus/foxess_inverter`. Run `script/sync_foxess_inverter.sh` to update it.
+
 ## Usage
 
 1. Navigate to Settings -> Devices & Services to find:
@@ -78,7 +90,7 @@ If your inverter supports setting charge periods, you can use install the [Charg
 
 ### Write Service
 
-A service to write any modbus address is available, similar to the native Home Assistant service. To use a service, navigate to Developer Tools -> Services and select it from the drop-down.
+Services to read and write any Modbus register are available. To use a service, navigate to Developer Tools -> Actions and select it from the drop-down.
 
 ![Service](images/svc-write.png)
 

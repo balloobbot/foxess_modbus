@@ -9,17 +9,12 @@ warn_unused_configs = true
 warn_unused_ignores = true
 namespace_packages = true
 explicit_package_bases = true
-exclude = [
-    'custom_components/foxess_modbus/vendor',
-]
+# Home Assistant packages re-export names without listing them in __all__.
+implicit_reexport = true
 
 [[tool.mypy.overrides]]
-module = 'serial.*'
+module = 'pytest_homeassistant_custom_component.*'
 ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = 'custom_components.foxess_modbus.vendor.*'
-follow_imports = 'skip'
 
 [tool.ruff]
 lint.select = ["E", "F", "I", "N", "ANN", "S", "B", "A", "COM", "C4", "DTZ", "ISC", "ICN", "G",
@@ -36,9 +31,18 @@ lint.unfixable = [
     "F841", # unused-variable
 ]
 line-length = 120
+target-version = "py313"
+# Vendored from foxess-inverter, which lints it with its own settings.
 extend-exclude = [
-    'custom_components/foxess_modbus/vendor',
+    'custom_components/foxess_modbus/foxess_inverter',
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# Home Assistant fixes the platform module names and the signatures of the
+# functions it calls, whether or not they use every argument.
+"custom_components/**" = ["A005", "ARG001", "ARG002", "ARG004"]
+# Tests request pytest fixtures by argument, whether or not they use them.
+"tests/**" = ["ARG001"]
 
 [tool.ruff.lint.isort]
 force-single-line = true
